@@ -23,16 +23,26 @@ PLAYER_STATS_TO_GET = {
     0: ROW_IDS_PLAYER + ['FGM', 'FGA',
        'FG_PCT', 'FG3M', 'FG3A', 'FG3_PCT', 'FTM', 'FTA', 'FT_PCT', 'OREB',
        'DREB', 'REB', 'AST', 'STL', 'BLK', 'TO', 'PF', 'PTS', 'PLUS_MINUS']
-    }#,
+    },
     # BoxScoreSummaryV2: [0],
-    # BoxScoreFourFactorsV2: [0],
-    # BoxScoreDefensive: [0]
+    BoxScoreFourFactorsV2: {
+    0: ROW_IDS_PLAYER + ['FTA_RATE', 'OPP_EFG_PCT', 'OPP_FTA_RATE', 'OPP_TOV_PCT', 'OPP_OREB_PCT']
+    },
+    BoxScoreUsageV2: {
+    0: ROW_IDS_PLAYER + ['PCT_FGM',
+       'PCT_FGA', 'PCT_FG3M', 'PCT_FG3A', 'PCT_FTM', 'PCT_FTA', 'PCT_OREB',
+       'PCT_DREB', 'PCT_REB', 'PCT_AST', 'PCT_TOV', 'PCT_STL', 'PCT_BLK',
+       'PCT_BLKA', 'PCT_PF', 'PCT_PFD', 'PCT_PTS']
+    },
+    BoxScoreMiscV2: {
+    0: ROW_IDS_PLAYER + ['PTS_OFF_TOV', 'PTS_2ND_CHANCE', 'PTS_FB', 'PTS_PAINT', 'OPP_PTS_OFF_TOV', 'OPP_PTS_2ND_CHANCE', 'OPP_PTS_FB', 'OPP_PTS_PAINT', 'BLK', 'BLKA', 'PF', 'PFD']
+    }
 }
 
 TEAM_STATS_TO_GET = {
     BoxScoreAdvancedV2: {
-    1: ROW_IDS_TEAM + ['TEAM_NAME', 'TEAM_ABBREVIATION', 'TEAM_CITY',
-       'MIN', 'E_OFF_RATING', 'OFF_RATING', 'E_DEF_RATING', 'DEF_RATING',
+    1: ROW_IDS_TEAM + ['TEAM_CITY',
+       'E_OFF_RATING', 'OFF_RATING', 'E_DEF_RATING', 'DEF_RATING',
        'E_NET_RATING', 'NET_RATING', 'AST_PCT', 'AST_TOV', 'AST_RATIO',
        'OREB_PCT', 'DREB_PCT', 'REB_PCT', 'E_TM_TOV_PCT', 'TM_TOV_PCT',
        'EFG_PCT', 'TS_PCT', 'USG_PCT', 'E_USG_PCT', 'E_PACE', 'PACE',
@@ -49,11 +59,30 @@ TEAM_STATS_TO_GET = {
        'FT_PCT', 'OREB', 'DREB', 'REB', 'AST', 'STL', 'BLK', 'TO', 'PF', 'PTS',
        'PLUS_MINUS'],
     2: ROW_IDS_TEAM + ['STARTERS_BENCH', 'MIN', 'FGM', 'FGA', 'FG_PCT', 'FG3M', 'FG3A', 'FG3_PCT', 'FTM', 'FTA', 'FT_PCT', 'OREB', 'DREB', 'REB', 'AST', 'STL', 'BLK', 'TO', 'PF', 'PTS']
-    }#,
+    },
     # BoxScoreSummaryV2: [0],
-    # BoxScoreFourFactorsV2: [0],
-    # BoxScoreDefensive: [0]
+    BoxScoreFourFactorsV2: {
+    1: ROW_IDS_TEAM + ['FTA_RATE', 'OPP_EFG_PCT','OPP_FTA_RATE', 'OPP_TOV_PCT', 'OPP_OREB_PCT']
+    },
+    BoxScoreUsageV2: {
+    1: ROW_IDS_TEAM + ['PCT_FGM', 'PCT_FGA', 'PCT_FG3M', 'PCT_FG3A',
+       'PCT_FTM', 'PCT_FTA', 'PCT_OREB', 'PCT_DREB', 'PCT_REB', 'PCT_AST',
+       'PCT_TOV', 'PCT_STL', 'PCT_BLK', 'PCT_BLKA', 'PCT_PF', 'PCT_PFD',
+       'PCT_PTS']
+    },
+   BoxScoreMiscV2: {
+    1: ROW_IDS_TEAM + ['PTS_OFF_TOV', 'PTS_2ND_CHANCE', 'PTS_FB', 'PTS_PAINT',
+       'OPP_PTS_OFF_TOV', 'OPP_PTS_2ND_CHANCE', 'OPP_PTS_FB', 'OPP_PTS_PAINT', 'BLKA', 'PFD']
+    },
+    LeagueGameFinder: {
+    0: ROW_IDS_TEAM + ['SEASON_ID', 'TEAM_ID', 'TEAM_ABBREVIATION', 'TEAM_NAME', 'GAME_ID',
+       'GAME_DATE', 'MATCHUP', 'WL', 'MIN', 'PTS', 'FGM', 'FGA', 'FG_PCT',
+       'FG3M', 'FG3A', 'FG3_PCT', 'FTM', 'FTA', 'FT_PCT', 'OREB', 'DREB',
+       'REB', 'AST', 'STL', 'BLK', 'TOV', 'PF', 'PLUS_MINUS']
+    }
 }
+
+
 
 def transform_stats_df(stats_df, df_index, stats_obj_class):
     if stats_obj_class == BoxScoreTraditionalV2 and df_index == 2:
