@@ -1,3 +1,13 @@
+from nba_api.stats.endpoints.leaguegamefinder import LeagueGameFinder
+from nba_api.stats.endpoints.boxscoreadvancedv2 import BoxScoreAdvancedV2
+from nba_api.stats.endpoints.boxscorescoringv2 import BoxScoreScoringV2
+from nba_api.stats.endpoints.boxscoretraditionalv2 import BoxScoreTraditionalV2
+from nba_api.stats.endpoints.boxscoresummaryv2 import BoxScoreSummaryV2
+from nba_api.stats.endpoints.boxscorefourfactorsv2 import BoxScoreFourFactorsV2
+from nba_api.stats.endpoints.boxscoredefensive import BoxScoreDefensive
+from nba_api.stats.endpoints.boxscoreusagev2 import BoxScoreUsageV2
+from nba_api.stats.endpoints.boxscoremiscv2 import BoxScoreMiscV2
+
 
 ROW_IDS_PLAYER = ['GAME_ID', 'TEAM_ID', 'PLAYER_ID']
 
@@ -24,7 +34,6 @@ PLAYER_STATS_TO_GET = {
        'FG_PCT', 'FG3M', 'FG3A', 'FG3_PCT', 'FTM', 'FTA', 'FT_PCT', 'OREB',
        'DREB', 'REB', 'AST', 'STL', 'BLK', 'TO', 'PF', 'PTS', 'PLUS_MINUS']
     },
-    # BoxScoreSummaryV2: [0],
     BoxScoreFourFactorsV2: {
     0: ROW_IDS_PLAYER + ['FTA_RATE', 'OPP_EFG_PCT', 'OPP_FTA_RATE', 'OPP_TOV_PCT', 'OPP_OREB_PCT']
     },
@@ -60,7 +69,6 @@ TEAM_STATS_TO_GET = {
        'PLUS_MINUS'],
     2: ROW_IDS_TEAM + ['STARTERS_BENCH', 'MIN', 'FGM', 'FGA', 'FG_PCT', 'FG3M', 'FG3A', 'FG3_PCT', 'FTM', 'FTA', 'FT_PCT', 'OREB', 'DREB', 'REB', 'AST', 'STL', 'BLK', 'TO', 'PF', 'PTS']
     },
-    # BoxScoreSummaryV2: [0],
     BoxScoreFourFactorsV2: {
     1: ROW_IDS_TEAM + ['FTA_RATE', 'OPP_EFG_PCT','OPP_FTA_RATE', 'OPP_TOV_PCT', 'OPP_OREB_PCT']
     },
@@ -83,15 +91,3 @@ TEAM_STATS_TO_GET = {
 }
 
 
-
-def transform_stats_df(stats_df, df_index, stats_obj_class):
-    if stats_obj_class == BoxScoreTraditionalV2 and df_index == 2:
-        value_cols = set(stats_df.columns) - set(ROW_IDS_TEAM+['STARTERS_BENCH'])
-        df_pivot = stats_df.pivot(columns='STARTERS_BENCH',  values=value_cols, index='TEAM_ID')
-        old_names = list(df_pivot.columns.values)
-        new_names = [str(o[0])+'_'+str(o[1]) for o in old_names]
-        df_pivot.columns = new_names
-        df_pivot['GAME_ID'] = np.unique(stats_df['GAME_ID'])[0]
-        return df_pivot
-    else:
-        return stats_df
