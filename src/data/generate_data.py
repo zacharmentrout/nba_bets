@@ -154,7 +154,6 @@ def merge_with_prefix_or_suffix(df1, df2, prefix='',suffix='', how='inner', left
 # all_players = players.get_players()
 
 
-
 data_location = '/Users/zach/Documents/git/nba_bets/data'
 
 data_dir = Path(data_location)
@@ -174,7 +173,6 @@ team_data_basic_list_preseason = [get_basic_game_info(season=s, season_type = 'P
 team_data_basic_regseason = pd.concat(team_data_basic_list_regseason)
 team_data_basic_preseason = pd.concat(team_data_basic_list_preseason)
 
-
 # keep only teams from preseason that are in regseason
 keep_preseason_rows = [True if s in team_data_basic_regseason['TEAM_ID'].unique() else False for s in team_data_basic_preseason['TEAM_ID']]
 
@@ -188,9 +186,15 @@ team_data_basic = pd.concat([team_data_basic_regseason, team_data_basic_preseaso
 # add other helpful columns
 team_data_basic['team_recency_rank'] = team_data_basic.sort_values(['GAME_DATE'], ascending=[False]).groupby(['TEAM_ID']).cumcount() + 1
 
-matchup_split = pd.DataFrame([re.split(' @ | vs. ', s) for s in team_data_basic['MATCHUP']], columns=['TEAM_ABBREVIATION_AWAY', 'TEAM_ABBREVIATION_HOME'])
+matchup_split1 = pd.DataFrame([re.split(' @ ', s) for s in team_data_basic['MATCHUP']], columns=['TEAM_ABBREVIATION_AWAY1', 'TEAM_ABBREVIATION_HOME1'])
 
-team_data_basic = pd.concat([team_data_basic, matchup_split], axis=1)
+matchup_split2 = pd.DataFrame([re.split(' vs. ', s) for s in team_data_basic['MATCHUP']], columns=['TEAM_ABBREVIATION_HOME2', 'TEAM_ABBREVIATION_AWAY2'])
+
+matchup_splits = pd.concat([matchup_split1, matchup_split2], axis=1)
+
+home_away_final = pd.DataFrame([[s1, s2] if s1 is not None and s2 is not None else [s3, s4] for s1, s2, s3, s4 in zip(matchup_splits['TEAM_ABBREVIATION_AWAY1'], matchup_splits['TEAM_ABBREVIATION_HOME1'], matchup_splits['TEAM_ABBREVIATION_AWAY2'], matchup_splits['TEAM_ABBREVIATION_HOME2'])], columns=['TEAM_ABBREVIATION_AWAY', 'TEAM_ABBREVIATION_HOME'])
+
+team_data_basic = pd.concat([team_data_basic, home_away_final], axis=1)
 
 team_data_basic.reset_index()
 
@@ -261,6 +265,8 @@ cols_to_int = ['NEXT_REGULAR_SEASON_NUMBER', 'NEXT_PRE_SEASON_NUMBER', 'PREVIOUS
 
 dim_season[cols_to_int] = dim_season[cols_to_int].fillna(-1).astype('int64')
 
+team_data_basic = team_data_basic.merge(dim_season[['SEASON_ID', 'SEASON_NUMBER']], how='left', on='SEASON_ID')
+
 # dim_season.set_index('SEASON_NUMBER', inplace=True, drop=False)
 
 dim_season.to_csv(raw_dir / 'dim_season.csv',  sep='|', index=False)
@@ -297,22 +303,71 @@ team_data_basic = merge_with_prefix_or_suffix(team_data_basic, dim_team[['TEAM_A
     keep_cols=['TEAM_ID', 'TEAM_NUMBER'])
 
 # drop rows that have team_number_away = NaN or team_number_home = NaN
-drop_rows =
+drop_rows1 = team_data_basic['TEAM_NUMBER_AWAY'].isna()
+drop_rows2 = team_data_basic['TEAM_NUMBER_HOME'].isna()
+drop_rows = [x1 or x2 for x1, x2 in zip(drop_rows1, drop_rows2)]
+team_data_basic = team_data_basic[np.logical_not(drop_rows)]
 
-team_data_basic.to_csv(raw_dir / 'team_data_basic_check.csv',  sep=',', index=False)
+cols_to_int = ['TEAM_NUMBER_HOME', 'TEAM_NUMBER_AWAY']
+
+team_data_basic[cols_to_int] = team_data_basic[cols_to_int].fillna(-1).astype('int64')
 
 # matchups
-dim_matchup = team_data_basic.groupby(['MATCHUP']).size().reset_index().rename(columns={0:'count'}).drop('count',axis=1)
+dim_matchup = team_data_basic.groupby(['TEAM_NUMBER_HOME', 'TEAM_NUMBER_AWAY']).size().reset_index().rename(columns={0:'count'}).drop('count',axis=1)
+
+pairings = pd.DataFrame([[s1, s2] if s1 < s2 else [s2, s1] for s1, s2 in zip(dim_matchup['TEAM_NUMBER_HOME'], dim_matchup['TEAM_NUMBER_AWAY'])], columns = ['TEAM_NUMBER_PAIRING1', 'TEAM_NUMBER_PAIRING2'])
+
+dim_matchup = pd.concat([dim_matchup, pairings], axis=1)
+
+dim_matchup['MATCHUP_NUMBER'] = np.arange(len(dim_matchup))
+
+team_data_basic = team_data_basic.merge(dim_matchup[['TEAM_NUMBER_HOME', 'TEAM_NUMBER_AWAY', 'MATCHUP_NUMBER']], how='left', on=['TEAM_NUMBER_HOME', 'TEAM_NUMBER_AWAY'])
+
+
+# pairing (no home/away distinction)
+dim_pairing = dim_matchup.groupby(['TEAM_NUMBER_PAIRING1', 'TEAM_NUMBER_PAIRING2']).size().reset_index().rename(columns={0:'count'}).drop('count',axis=1)
+
+dim_pairing['PAIRING_NUMBER'] = np.arange(len(dim_pairing))
+
+dim_matchup = dim_matchup.merge(dim_pairing, how='left', on=['TEAM_NUMBER_PAIRING1', 'TEAM_NUMBER_PAIRING2'])
+
+dim_pairing = merge_with_prefix_or_suffix(dim_pairing, dim_team[['TEAM_NUMBER', 'TEAM_ABBREVIATION']], how='left', left_on='TEAM_NUMBER_PAIRING1', right_on='TEAM_NUMBER', suffix='_PAIRING1')
+dim_pairing = merge_with_prefix_or_suffix(dim_pairing, dim_team[['TEAM_NUMBER', 'TEAM_ABBREVIATION']], how='left', left_on='TEAM_NUMBER_PAIRING2', right_on='TEAM_NUMBER', suffix='_PAIRING2')
+dim_pairing['PAIRING_NAME'] = [s1 + '_vs_' + s2 for s1, s2 in zip(dim_pairing['TEAM_ABBREVIATION_PAIRING1'], dim_pairing['TEAM_ABBREVIATION_PAIRING2'])]
+
+team_data_basic = team_data_basic.merge(dim_matchup[['MATCHUP_NUMBER', 'PAIRING_NUMBER']], how='left', on='MATCHUP_NUMBER')
 
 # games
-dim_game = team_data_basic.groupby(['GAME_ID', 'SEASON_ID', 'MATCHUP', 'GAME_DATE']).size().reset_index().rename(columns={0:'count'}).drop('count',axis=1)
+dim_game = team_data_basic.groupby(['GAME_ID', 'SEASON_ID', 'GAME_DATE', 'PAIRING_NUMBER', 'MATCHUP_NUMBER', 'TEAM_NUMBER_HOME', 'TEAM_NUMBER_AWAY']).size().reset_index().rename(columns={0:'count'}).drop('count',axis=1)
 
 dim_game = dim_game.merge(dim_season[['SEASON_ID', 'SEASON_NUMBER', 'SEASON_TYPE', 'SEASON_NAME']], how='left', on='SEASON_ID')
 
+dim_game['GAME_NUMBER'] = np.arange(len(dim_game))
 
-# write to csv file
-team_data_basic.to_csv(raw_dir / 'team_data_raw.csv',  sep='|', index=False)
+team_data_basic = team_data_basic.merge(dim_game[['GAME_ID', 'GAME_NUMBER']], how='left', on='GAME_ID')
 
+# assign next and previous game numbers
+team_data_basic = team_data_basic.merge(dim_team[['TEAM_ID', 'TEAM_NUMBER']], how='left', on='TEAM_ID')
+
+team_data_basic['TEAM_IS_HOME_TEAM'] = [1 if s1 == s2 else 0 for s1, s2 in zip(team_data_basic['TEAM_NUMBER'], team_data_basic['TEAM_NUMBER_HOME'])]
+
+team_data_basic['TEAM_HOME_OR_AWAY'] = ['HOME' if t == 1 else 'AWAY' for t in team_data_basic['TEAM_IS_HOME_TEAM']]
+
+# drop rows with no valid win/loss
+drop_rows_wl = team_data_basic['WL'].isna()
+team_data_basic = team_data_basic[np.logical_not(drop_rows_wl)]
+
+
+# sort by team and game date
+team_data_basic.sort_values(by=['TEAM_NUMBER',  'GAME_DATE'], inplace=True)
+
+
+# team_data_basic['games_by_season_cumulative'] = team_data_basic.groupby(['TEAM_NUMBER', 'SEASON_NUMBER']).cumcount()+1
+
+# calculate stats
+
+# write to file
+team_data_basic.to_csv(raw_dir / 'game_data_by_team.csv',  sep='|', index=False)
 
 # game_ids = np.unique(team_data['GAME_ID'])
 
