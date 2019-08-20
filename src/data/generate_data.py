@@ -12,9 +12,10 @@ import dateutil
 import datetime as dt
 import traceback
 import time
-from nba_api.stats.static import players
-from nba_api.stats.static import teams
-from nba_api.stats.static import season
+import re
+# from nba_api.stats.static import players
+# from nba_api.stats.static import teams
+# from nba_api.stats.static import season
 from nba_api.stats.endpoints.leaguegamefinder import LeagueGameFinder
 from nba_api.stats.endpoints.boxscoreadvancedv2 import BoxScoreAdvancedV2
 from nba_api.stats.endpoints.boxscorescoringv2 import BoxScoreScoringV2
@@ -350,6 +351,8 @@ team_data_basic = team_data_basic.merge(dim_game[['GAME_ID', 'GAME_NUMBER']], ho
 team_data_basic = team_data_basic.merge(dim_team[['TEAM_ID', 'TEAM_NUMBER']], how='left', on='TEAM_ID')
 
 team_data_basic['TEAM_IS_HOME_TEAM'] = [1 if s1 == s2 else 0 for s1, s2 in zip(team_data_basic['TEAM_NUMBER'], team_data_basic['TEAM_NUMBER_HOME'])]
+
+team_data_basic['TEAM_IS_AWAY_TEAM'] = [1 if s1 == s2 else 0 for s1, s2 in zip(team_data_basic['TEAM_NUMBER'], team_data_basic['TEAM_NUMBER_AWAY'])]
 
 team_data_basic['TEAM_HOME_OR_AWAY'] = ['HOME' if t == 1 else 'AWAY' for t in team_data_basic['TEAM_IS_HOME_TEAM']]
 
