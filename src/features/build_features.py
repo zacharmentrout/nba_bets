@@ -217,3 +217,8 @@ new_names = [str(o[0])+'_'+str(o[1]) for o in old_names]
 team_data_pivot.columns = new_names
 
 team_data_pivot.to_csv(raw_dir / 'features_check2.csv',  sep=',', index=False)
+
+
+# to do:
+# add dim_game data
+# add other columns to pivot besides these

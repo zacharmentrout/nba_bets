@@ -25,7 +25,8 @@ from nba_api.stats.endpoints.boxscorefourfactorsv2 import BoxScoreFourFactorsV2
 from nba_api.stats.endpoints.boxscoredefensive import BoxScoreDefensive
 from nba_api.stats.endpoints.boxscoreusagev2 import BoxScoreUsageV2
 from nba_api.stats.endpoints.boxscoremiscv2 import BoxScoreMiscV2
-
+from nba_api.stats.endpoints.teamgamelog import TeamGameLog
+from nba_api.stats.endpoints.scoreboardv2 import ScoreboardV2
 
 def transform_stats_df(stats_df, df_index, stats_obj_class):
     if stats_obj_class == BoxScoreTraditionalV2 and df_index == 2:
@@ -38,6 +39,28 @@ def transform_stats_df(stats_df, df_index, stats_obj_class):
         return df_pivot
     else:
         return stats_df
+
+def get_full_game_schedule(season_year):
+    if isinstance(season_year, int):
+        season_year = [season_year]
+    all_rows = []
+    for yr in season_year:
+        url_to_get = 'http://data.nba.com/data/10s/v2015/json/mobile_teams/nba/' + str(yr)+'/league/00_full_schedule_week.json'
+        req = requests.get(url_to_get)
+        sched_data_by_month = req.json()['lscd']
+        for month in range(len(sched_data_by_month)):
+            sched = sched_data_by_month[month]['mscd']
+            for item in sched['g']:
+                game_id = item['gid']
+                game_date = item['gdte']
+                away_team_id = item['v']['tid']
+                home_team_id = item['h']['tid']
+                new_row = [game_id, game_date, home_team_id, away_team_id]
+                all_rows.append(new_row)
+
+        game_sched_data = pd.DataFrame(all_rows, columns = ['GAME_ID', 'GAME_DATE', 'TEAM_ID_HOME', 'TEAM_ID_AWAY'])
+        game_sched_data.sort_values('GAME_DATE', inplace=True)
+    return (game_sched_data)
 
 
 def get_proxies():
@@ -163,7 +186,7 @@ interim_dir = data_dir / 'interim'
 processed_dir = data_dir / 'processed'
 
 # all seasons
-all_seasons = ['2007-08', '2008-09', '2009-10', '2010-11', '2011-12', '2012-13', '2013-14', '2014-15', '2015-16', '2016-17', '2017-18', '2018-19']
+all_seasons = ['2007-08', '2008-09', '2009-10', '2010-11', '2011-12', '2012-13', '2013-14', '2014-15', '2015-16', '2016-17', '2017-18', '2018-19', '2019-20']
 
 # regular season
 team_data_basic_list_regseason = [get_basic_game_info(season=s) for s in all_seasons]
@@ -279,6 +302,8 @@ dim_team = team_data_basic[team_data_basic['team_recency_rank'] == 1][['TEAM_ID'
 
 dim_team['TEAM_NUMBER'] = np.arange(len(dim_team))
 
+dim_team.to_csv(raw_dir / 'dim_team.csv', sep='|', index=False)
+
 dim_team_alt_abbrev = team_data_basic[['TEAM_ID', 'TEAM_ABBREVIATION']].drop_duplicates()
 dim_team_alt_abbrev = merge_with_prefix_or_suffix(dim_team_alt_abbrev, dim_team[['TEAM_ID', 'TEAM_NUMBER']]
     ,how='left'
@@ -322,6 +347,10 @@ dim_matchup = pd.concat([dim_matchup, pairings], axis=1)
 
 dim_matchup['MATCHUP_NUMBER'] = np.arange(len(dim_matchup))
 
+
+dim_matchup.to_csv(raw_dir / 'dim_matchup.csv', sep='|', index=False)
+
+
 team_data_basic = team_data_basic.merge(dim_matchup[['TEAM_NUMBER_HOME', 'TEAM_NUMBER_AWAY', 'MATCHUP_NUMBER']], how='left', on=['TEAM_NUMBER_HOME', 'TEAM_NUMBER_AWAY'])
 
 
@@ -336,6 +365,9 @@ dim_pairing = merge_with_prefix_or_suffix(dim_pairing, dim_team[['TEAM_NUMBER', 
 dim_pairing = merge_with_prefix_or_suffix(dim_pairing, dim_team[['TEAM_NUMBER', 'TEAM_ABBREVIATION']], how='left', left_on='TEAM_NUMBER_PAIRING2', right_on='TEAM_NUMBER', suffix='_PAIRING2')
 dim_pairing['PAIRING_NAME'] = [s1 + '_vs_' + s2 for s1, s2 in zip(dim_pairing['TEAM_ABBREVIATION_PAIRING1'], dim_pairing['TEAM_ABBREVIATION_PAIRING2'])]
 
+
+dim_pairing.to_csv(raw_dir / 'dim_pairing.csv', sep='|', index=False)
+
 team_data_basic = team_data_basic.merge(dim_matchup[['MATCHUP_NUMBER', 'PAIRING_NUMBER']], how='left', on='MATCHUP_NUMBER')
 
 # games
@@ -344,6 +376,8 @@ dim_game = team_data_basic.groupby(['GAME_ID', 'SEASON_ID', 'GAME_DATE', 'PAIRIN
 dim_game = dim_game.merge(dim_season[['SEASON_ID', 'SEASON_NUMBER', 'SEASON_TYPE', 'SEASON_NAME']], how='left', on='SEASON_ID')
 
 dim_game['GAME_NUMBER'] = np.arange(len(dim_game))
+
+dim_game.to_csv(raw_dir / 'dim_game.csv', sep='|', index=False)
 
 team_data_basic = team_data_basic.merge(dim_game[['GAME_ID', 'GAME_NUMBER']], how='left', on='GAME_ID')
 
@@ -372,46 +406,12 @@ team_data_basic.sort_values(by=['TEAM_NUMBER',  'GAME_DATE'], inplace=True)
 # write to file
 team_data_basic.to_csv(raw_dir / 'game_data_by_team.csv',  sep='|', index=False)
 
-# game_ids = np.unique(team_data['GAME_ID'])
-
-# game_ids_sub = game_ids[0:10]
-
-
-# bs_mis = BoxScoreMiscV2(end_period=0, game_id=game_ids[0])
-
-# start = time.time()
-# data_boxscore = [get_boxscore_data(id) for id in game_ids[0:100]]
-# end = time.time()
-# print(end - start)
-
-# proxy = next(proxy_pool)
-# data_boxscore = get_boxscore_data(game_ids[99], proxy=proxy)
-
-
-# bs_adv = BoxScoreAdvancedV2(end_period=0,
-#         game_id=game_ids[98],  proxy=proxy)
-
-
-# games2 = get_boxscore_data(game_ids[0])
-
-# games = gamefinder.get_data_frames()[0]
-
-# games2 = get_boxscore_data_from_data_frames(gamefinder, player_or_team='team')
-
-# game_id = '0021501225'
-# end_period=0
-# stats_obj = bs_tra
-# stats_df = dfs[2][stats_to_get[2]]
-# df_index = 2
-# stats_obj_class = type(stats_obj)
-# player_or_team = 'both'
-
-# gid = '0021501225'
-# res = get_boxscore_data(gid)
-# res_player = res['player']
-# res_team = res['team']
-# g0 = games[games['GAME_ID'] == gid]
 
 
 
-# team_stats = pd.merge(g0, res_team, on=ROW_IDS_TEAM)
+############################
+# experiment with getting upcoming games
+############################
+
+# team game log doesn't work
+
