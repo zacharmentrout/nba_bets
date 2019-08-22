@@ -13,6 +13,11 @@ import datetime as dt
 import traceback
 import time
 import re
+
+
+# To do
+# Fix get full game sched function to include team abbrev, team name but not home/away id, name abbrev
+
 # from nba_api.stats.static import players
 # from nba_api.stats.static import teams
 # from nba_api.stats.static import season
@@ -40,7 +45,7 @@ def transform_stats_df(stats_df, df_index, stats_obj_class):
     else:
         return stats_df
 
-def get_full_game_schedule(season_year):
+def get_full_game_schedule(season_year, skeleton=False):
     if isinstance(season_year, int):
         season_year = [season_year]
     all_rows = []
@@ -54,14 +59,27 @@ def get_full_game_schedule(season_year):
                 game_id = item['gid']
                 game_date = item['gdte']
                 away_team_id = item['v']['tid']
+                away_team_ab = item['v']['ta']
+                away_team_name  = item['v']['tn']
                 home_team_id = item['h']['tid']
-                new_row = [game_id, game_date, home_team_id, away_team_id]
-                all_rows.append(new_row)
+                home_team_ab = item['h']['ta']
+                home_team_name = item['h']['tn']
+                season_id = game_id[2] + str(yr)
+                matchup = away_team_ab + ' @ ' + home_team_ab
+                new_row = [season_id, game_id, game_date, matchup, home_team_ab, away_team_ab]
 
-        game_sched_data = pd.DataFrame(all_rows, columns = ['GAME_ID', 'GAME_DATE', 'TEAM_ID_HOME', 'TEAM_ID_AWAY'])
+                if skeleton:
+                    all_rows.append([home_team_id, home_team_ab, home_team_name] + new_row)
+                    all_rows.append([away_team_id, away_team_ab, away_team_name] + new_row)
+                else:
+                    all_rows.append(new_row)
+        col_names = ['SEASON_ID', 'GAME_ID', 'GAME_DATE', 'MATCHUP', 'TEAM_ABBREVIATION_HOME', 'TEAM_ABBREVIATION_AWAY']
+        if skeleton:
+            col_names = ['TEAM_ID', 'TEAM_ABBREVIATION', 'TEAM_NAME'] + col_names
+        game_sched_data = pd.DataFrame(all_rows, columns = col_names)
+        game_sched_data['SEASON_TYPE'] = ['Regular Season' if left(s, 1) == '2' else 'Pre Season' for s in game_sched_data['SEASON_ID']]
         game_sched_data.sort_values('GAME_DATE', inplace=True)
     return (game_sched_data)
-
 
 def get_proxies():
     # Retrieve latest proxies
@@ -224,6 +242,18 @@ team_data_basic.reset_index()
 
 
 ##################################
+# get upcoming games
+##################################
+
+game_sched_full = get_full_game_schedule(2019, skeleton=True)
+game_ids_new = set(game_sched_full['GAME_ID']) - set(team_data_basic['GAME_ID'])
+
+keep_rows = [True if s in game_ids_new else False for s in game_sched_full['GAME_ID']]
+game_sched_full = game_sched_full[keep_rows]
+
+team_data_basic = pd.concat([team_data_basic, game_sched_full], sort=True)
+
+##################################
 # make dimension tables
 ##################################
 
@@ -371,6 +401,10 @@ dim_pairing.to_csv(raw_dir / 'dim_pairing.csv', sep='|', index=False)
 team_data_basic = team_data_basic.merge(dim_matchup[['MATCHUP_NUMBER', 'PAIRING_NUMBER']], how='left', on='MATCHUP_NUMBER')
 
 # games
+
+# convert game date col to date
+team_data_basic['GAME_DATE'] = [dt.datetime.strptime(s, '%Y-%m-%d').date() for s in team_data_basic['GAME_DATE']]
+
 dim_game = team_data_basic.groupby(['GAME_ID', 'SEASON_ID', 'GAME_DATE', 'PAIRING_NUMBER', 'MATCHUP_NUMBER', 'TEAM_NUMBER_HOME', 'TEAM_NUMBER_AWAY']).size().reset_index().rename(columns={0:'count'}).drop('count',axis=1)
 
 dim_game = dim_game.merge(dim_season[['SEASON_ID', 'SEASON_NUMBER', 'SEASON_TYPE', 'SEASON_NAME']], how='left', on='SEASON_ID')
@@ -390,10 +424,12 @@ team_data_basic['TEAM_IS_AWAY_TEAM'] = [1 if s1 == s2 else 0 for s1, s2 in zip(t
 
 team_data_basic['TEAM_HOME_OR_AWAY'] = ['HOME' if t == 1 else 'AWAY' for t in team_data_basic['TEAM_IS_HOME_TEAM']]
 
-# drop rows with no valid win/loss
-drop_rows_wl = team_data_basic['WL'].isna()
-team_data_basic = team_data_basic[np.logical_not(drop_rows_wl)]
 
+# drop rows with no valid win/loss
+drop_rows1 = team_data_basic['WL'].isna()
+drop_rows2 = [d <= dt.date.today() for d in team_data_basic['GAME_DATE']]
+drop_rows_wl = [l1 and l2 for l1,l2 in zip(drop_rows1, drop_rows2)]
+team_data_basic = team_data_basic[np.logical_not(drop_rows_wl)]
 
 # sort by team and game date
 team_data_basic.sort_values(by=['TEAM_NUMBER',  'GAME_DATE'], inplace=True)
@@ -408,10 +444,4 @@ team_data_basic.to_csv(raw_dir / 'game_data_by_team.csv',  sep='|', index=False)
 
 
 
-
-############################
-# experiment with getting upcoming games
-############################
-
-# team game log doesn't work
 
