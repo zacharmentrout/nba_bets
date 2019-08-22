@@ -439,7 +439,22 @@ team_data_basic.sort_values(by=['TEAM_NUMBER',  'GAME_DATE'], inplace=True)
 
 # calculate stats
 
-# write to file
+# write dtypes to file
+dtypes_out = pd.DataFrame(team_data_basic.dtypes, columns=['t'])
+dtypes_out['col_name'] = dtypes_out.index
+
+
+dtypes_new = ['float64' if dtypes_out[dtypes_out['col_name'] == s]['t'][0] == 'object' and isinstance(team_data_basic[s][0], int) else dtypes_out[dtypes_out['col_name'] == s]['t'][0] for s in dtypes_out['col_name']]
+
+dtypes_out['t'] = dtypes_new
+
+dtypes_dict = dict(zip(dtypes_out['col_name'], dtypes_out['t']))
+
+team_data_basic = team_data_basic.astype(dtypes_dict)
+
+dtypes_out.to_csv(raw_dir / 'dtypes_game_data_by_team.csv', sep='|', index=False)
+
+# write team game data to file
 team_data_basic.to_csv(raw_dir / 'game_data_by_team.csv',  sep='|', index=False)
 
 

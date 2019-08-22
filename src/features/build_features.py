@@ -72,6 +72,19 @@ def make_court_col(df, s):
     result_df = pd.DataFrame(result, columns=[s+'COURT'])
     return(result_df)
 
+def multiindex_pivot(df, columns=None, values=None):
+    #https://github.com/pandas-dev/pandas/issues/23955
+    names = list(df.index.names)
+    df = df.reset_index()
+    list_index = df[names].values
+    tuples_index = [tuple(i) for i in list_index] # hashable
+    df = df.assign(tuples_index=tuples_index)
+    df = df.pivot(index="tuples_index", columns=columns, values=values)
+    tuples_index = df.index  # reduced
+    index = pd.MultiIndex.from_tuples(tuples_index, names=names)
+    df.index = index
+    return df
+
 
 # location of data directory
 data_location = '/Users/zach/Documents/git/nba_bets/data'
@@ -81,8 +94,13 @@ raw_dir = data_dir / 'raw'
 interim_dir = data_dir / 'interim'
 processed_dir = data_dir / 'processed'
 
+# get dtypes
+dtypes_get = pd.read_csv(raw_dir / 'dtypes_game_data_by_team.csv',sep='|',dtype='object')
+dtypes_dict = dict(zip(dtypes_get['col_name'], dtypes_get['t']))
+
 # read in data
-team_data =  pd.read_csv(raw_dir / 'game_data_by_team.csv', sep = '|')
+team_data =  pd.read_csv(raw_dir / 'game_data_by_team.csv', sep = '|', dtype=dtypes_dict)
+
 
 team_data.sort_values(by=['TEAM_NUMBER',  'GAME_DATE'], inplace=True)
 
@@ -182,23 +200,29 @@ team_data_away = calc_groupby_feature(team_data_away, calc_stat_expanding_mean, 
 team_data_home = calc_groupby_feature(team_data_home, calc_stat_ewma, ewma_features, groupby_col= ['TEAM_NUMBER', 'SEASON_NUMBER'], prefix='TEAM_FEATURE_', suffix='_ewma_HOME')
 team_data_away= calc_groupby_feature(team_data_away, calc_stat_ewma, ewma_features, groupby_col= ['TEAM_NUMBER', 'SEASON_NUMBER'], prefix='TEAM_FEATURE_', suffix='_ewma_AWAY')
 
+# add targets
 
-home_cols = [s for s in team_data_home.columns if s.endswith('_HOME') and s.startswith(('TEAM_FEATURE_', 'GAME_NUMBER_'))]
-away_cols = [s for s in team_data_away.columns if s.endswith('_AWAY') and s.startswith(('TEAM_FEATURE_', 'GAME_NUMBER_'))]
+home_cols = [s for s in team_data_home.columns if s.endswith('_HOME') and s.startswith(('TEAM_FEATURE_', 'GAME_NUMBER_', 'TARGET_'))]
+away_cols = [s for s in team_data_away.columns if s.endswith('_AWAY') and s.startswith(('TEAM_FEATURE_', 'GAME_NUMBER_', 'TARGET'))]
 
 home_feature_cols = [s for s in home_cols if s.startswith('TEAM_FEATURE')]
 away_feature_cols = [s for s in away_cols if s.startswith('TEAM_FEATURE')]
 
+#home_cols = home_cols + ['PTS']
+#away_cols = away_cols + ['PTS']
+
 home_away_feature_col_prefixes = [left(s, len(s) - 4) for s in home_feature_cols]
 
 team_data = team_data.merge(team_data_home[['TEAM_NUMBER', 'GAME_NUMBER']+home_cols], how='left', on=['TEAM_NUMBER', 'GAME_NUMBER']).merge(team_data_away[['TEAM_NUMBER', 'GAME_NUMBER']+away_cols], how='left', on=['TEAM_NUMBER', 'GAME_NUMBER'])
-
 
 court_col_list = [make_court_col(team_data, c) for c in home_away_feature_col_prefixes]
 
 court_col_df = pd.concat(court_col_list, axis=1)
 
 team_data = pd.concat([team_data, court_col_df], axis=1)
+
+team_data['WIN_HOME'] = team_data['TEAM_IS_HOME_TEAM'] * team_data['WIN'] + team_data['TEAM_IS_AWAY_TEAM'] * team_data['LOSE']
+team_data['WIN_AWAY'] = 1 - team_data['WIN_HOME']
 
 team_data.to_csv(raw_dir / 'features_check.csv',  sep=',', index=False)
 
@@ -207,18 +231,31 @@ team_data.to_csv(raw_dir / 'features_check.csv',  sep=',', index=False)
 
 team_feature_cols = [s for s in team_data.columns if s.startswith('TEAM_FEATURE_') and not s.endswith('_HOME') and not s.endswith('_AWAY')]
 
-team_data_pivot = team_data.pivot(index='GAME_NUMBER', columns='TEAM_HOME_OR_AWAY',  values=team_feature_cols)
+other_pivot_cols = ['WIN_HOME', 'WIN_AWAY']
 
-team_data_pivot.reset_index(level=0, inplace=True)
+team_data_new = team_data.set_index(['GAME_NUMBER', 'WIN_HOME'], drop=True)
+
+team_data_pivot = multiindex_pivot(team_data_new, columns='TEAM_HOME_OR_AWAY',  values=team_feature_cols)
+
+team_data_pivot.reset_index(inplace=True)
 
 old_names = list(team_data_pivot.columns.values)
-new_names = [str(o[0])+'_'+str(o[1]) for o in old_names]
+new_names = [str(o[0])+'_'+str(o[1]) if o[1] != '' else o[0] for o in old_names]
 
 team_data_pivot.columns = new_names
 
-team_data_pivot.to_csv(raw_dir / 'features_check2.csv',  sep=',', index=False)
+# add dim_game data
+dim_game = pd.read_csv(raw_dir / 'dim_game.csv', sep='|')
 
 
+# training data full
+
+train_data = dim_game.merge(team_data_pivot, how='left', on='GAME_NUMBER')
+
+
+train_data.to_csv(raw_dir / 'features_check2.csv',  sep=',', index=False)
+
+train_data.to_csv(processed_dir / 'training_data.csv',  sep='|', index=False)
 # to do:
 # add dim_game data
 # add other columns to pivot besides these
