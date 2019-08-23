@@ -57,6 +57,54 @@ def accuracy(pred, obs):
         raise ValueError('Predictions and observations different lengths')
     return(sum((pred == obs)*1) / len(pred))
 
+def plot_xgb_feat_importance(model_obj, predictors, importance_type='gain', color='red', max_num_features=50):
+    mapper = {'f{0}'.format(i): v for i, v in enumerate(predictors)}
+    mapped = {mapper[k]: v for k, v in model_obj.get_booster().get_score().items()}
+    fig = plt.figure(dpi=180)
+    ax = plt.subplot(1,1,1)
+    xgb.plot_importance(mapped, color=color, max_num_features=max_num_features, importance_type=importance_type)
+
+    plt.tight_layout()
+    plt.show()
+
+def calc_model_performance(df, col_name_pred='pred', col_name_obs='obs',type='classification'):
+    if type == 'classification':
+        df[col_name_pred + '_01'] = (df[col_name_pred] >= 0.5) * 1
+        out = pd.DataFrame()
+        out['auc'] = [metrics.roc_auc_score(df[col_name_obs],df[col_name_pred])]
+        out['logloss'] = [metrics.log_loss(df[col_name_obs],df[col_name_pred])]
+        out['accuracy'] = [accuracy(df[col_name_pred + '_01'],df[col_name_obs])]
+    else:
+        raise ValueError('incorrect type')
+
+    return(out)
+
+def assign_home_away_prob(train, test):
+    test['pred_prob_HOME'] = test['pred']
+    test['pred_prob_AWAY'] = 1 - test['pred_prob_HOME']
+
+    test['pred_prob_calib_HOME'] = test['pred_calib']
+    test['pred_prob_calib_AWAY'] = 1 - test['pred_prob_calib_HOME']
+
+    train['pred_prob_HOME'] = train['pred']
+    train['pred_prob_AWAY'] = 1 - train['pred_prob_HOME']
+
+    train['pred_prob_calib_HOME'] = train['pred_calib']
+    train['pred_prob_calib_AWAY'] = 1 - train['pred_prob_calib_HOME']
+
+    test['pred_win_HOME'] = (test['pred'] >= 0.5)*1
+    test['pred_win_AWAY'] = 1 - test['pred_win_HOME']
+
+    train['pred_win_HOME'] = (train['pred'] >= 0.5)*1
+    train['pred_win_AWAY'] = (train['pred'] >= 0.5)*1
+
+    test['pred_win_calib_HOME'] = (test['pred_calib'] >= 0.5)*1
+    test['pred_win_calib_AWAY'] = 1 - test['pred_win_calib_HOME']
+
+    train['pred_win_calib_HOME'] = (train['pred_calib'] >= 0.5)*1
+    train['pred_win_calib_AWAY'] = 1 - train['pred_win_calib_HOME']
+
+    return(train, test)
 
 ##################
 # read in data
@@ -235,10 +283,10 @@ model_param_dict = {
 
 # prep
 min_date_train = '2007-11-21'
-max_date_train = '2018-04-11'
+max_date_train = '2017-04-12'
 
-min_date_test = '2018-10-16'
-max_date_test = '2019-04-10'
+min_date_test = '2017-10-17'
+max_date_test = '2018-04-11'
 
 train_frac = 0.8
 
@@ -282,86 +330,21 @@ mod1.fit(train1_x, train1[target])
 mod_calib = CalibratedClassifierCV(mod1, method='sigmoid',cv='prefit')
 mod_calib.fit(calib1_x, calib1[target])
 
+test_dat['pred'] = mod1.predict_proba(test1_x)[:,1]
+train1['pred'] = mod1.predict_proba(train1_x)[:,1]
 
-pred_test = mod1.predict_proba(test1_x)
-pred_train = mod1.predict_proba(train1_x)
-
-pred_calib_test = mod_calib.predict_proba(test1_x)
-pred_calib_train = mod_calib.predict_proba(train1_x)
-
-test1['pred1'] = pred_test[:,1]
-train1['pred1'] = pred_train[:,1]
-
-test1['pred1_calib'] = pred_calib_test[:,1]
-train1['pred1_calib'] = pred_calib_train[:,1]
-
-test1['pred_prob_team1'] = test1['pred1']
-test1['pred_prob_team2'] = 1 - test1['pred_prob_team1']
-
-test1['pred_prob_calib_team1'] = test1['pred1_calib']
-test1['pred_prob_calib_team2'] = 1 - test1['pred_prob_calib_team1']
-
-train1['pred_prob_team1'] = train1['pred1']
-train1['pred_prob_team2'] = 1 - train1['pred_prob_team1']
-
-train1['pred_prob_calib_team1'] = train1['pred1_calib']
-train1['pred_prob_calib_team2'] = 1 - train1['pred_prob_calib_team1']
-
-test1['pred_win'] = (test1['pred1'] >= 0.5)*1
-train1['pred_win'] = (train1['pred1'] >= 0.5)*1
-
-test1['pred_win_calib'] = (test1['pred1_calib'] >= 0.5)*1
-train1['pred_win_calib'] = (train1['pred1_calib'] >= 0.5)*1
+test_dat['pred_calib'] = mod_calib.predict_proba(test1_x)[:,1]
+train1['pred_calib'] = mod_calib.predict_proba(train1_x)[:,1]
 
 
-# auc
-auc_test = metrics.roc_auc_score(test1[target],test1['pred1'])
-auc_train = metrics.roc_auc_score(train1[target],train1['pred1'])
+train1, test_dat = assign_home_away_prob(train1, test_dat)
 
-auc_calib_test = metrics.roc_auc_score(test1[target],test1['pred1_calib'])
-auc_calib_train = metrics.roc_auc_score(train1[target],train1['pred1_calib'])
+perf_test = calc_model_performance(test_dat, 'pred', target)
+perf_calib_test = calc_model_performance(test_dat, 'pred_calib', target)
+perf_train = calc_model_performance(train1, 'pred', target)
+perf_calib_train = calc_model_performance(train1, 'pred_calib', target)
 
-
-# log loss
-logloss_test = metrics.log_loss(test1[target],test1['pred1'])
-logloss_train = metrics.log_loss(train1[target],train1['pred1'])
-
-logloss_calib_test = metrics.log_loss(test1[target], test1['pred_prob_calib_team1'])
-logloss_calib_train = metrics.log_loss(train1[target], train1['pred_prob_calib_team1'])
-
-
-accuracy_test = accuracy(test1['pred_win'], test1['WIN_HOME'])
-accuracy_train = accuracy(train1['pred_win'], train1['WIN_HOME'])
-
-accuracy_calib_test = accuracy(test1['pred_win_calib'], test1['WIN_HOME'])
-accuracy_calib_train = accuracy(train1['pred_win_calib'], train1['WIN_HOME'])
-
-model = mod1
-plt.bar(range(len(model.feature_importances_)), model.feature_importances_)
-plot_importance(mod1)
-pyplot.show()
-
-print(mod1.feature_importances_)
-
-mod1.get_booster().get_score().items()
-mapper = {'f{0}'.format(i): v for i, v in enumerate(predictors)}
-mapped = {mapper[k]: v for k, v in mod1.get_booster().get_score().items()}
-mapped
-
-xgb.plot_importance(mapped, color='red', max_num_features=30, importance_type='gain')
-
-imp_plot.tight_layout()
-plt.tight_layout()
-
-def plot_xgb_feat_importance(model_obj, predictors, importance_type='gain', color='red', max_num_features=50):
-    mapper = {'f{0}'.format(i): v for i, v in enumerate(predictors)}
-    mapped = {mapper[k]: v for k, v in model_obj.get_booster().get_score().items()}
-    fig = plt.figure(dpi=180)
-    ax = plt.subplot(1,1,1)
-    xgb.plot_importance(mapped, color=color, max_num_features=max_num_features, importance_type=importance_type)
-
-    plt.tight_layout()
-    plt.show()
-
+perf_all = pd.concat([perf_test, perf_calib_test, perf_train, perf_calib_train])
+perf_all['description'] = ['test', 'test_calib', 'train', 'train_calib']
 
 plot_xgb_feat_importance(mod1, predictors, 'gain', 'blue', 50)
