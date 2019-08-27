@@ -185,15 +185,361 @@ def merge_with_prefix_or_suffix(df1, df2, prefix='',suffix='', how='inner', left
     return(df_merged)
 
 
+def get_dtypes_dict(dtype_file, col_name_col_name='col_name', dtype_col_name='type'):
+    dtypes_get = pd.read_csv(dtype_file,sep='|',dtype='object')
+    dtypes_dict = dict(zip(dtypes_get[col_name_col_name], dtypes_get[dtype_col_name]))
+    return(dtypes_dict)
 
 
-# get all games
+def process_raw_team_game_data(raw_data_file, dtype_file, out_dir, out_file_name, dim_directory):
 
-# proxies = get_proxies()
-# proxy_pool = cycle(proxies)
+    dtypes_dim_game = get_dtypes_dict(dim_directory / 'dim_game_dtypes.csv')
+    dtypes_dim_season = get_dtypes_dict(dim_directory / 'dim_season_dtypes.csv')
+    dtypes_dim_matchup = get_dtypes_dict(dim_directory / 'dim_matchup_dtypes.csv')
+    dtypes_dim_abbrev = get_dtypes_dict(dim_directory / 'dim_team_alt_abbrev_dtypes.csv')
 
-# # get all players
-# all_players = players.get_players()
+    dim_game = pd.read_csv(dim_directory / 'dim_game.csv', sep='|', dtype=dtypes_dim_game)
+    #dim_team = dim_tables['teams']
+    dim_matchup = pd.read_csv(dim_directory / 'dim_matchup.csv', sep='|', dtype=dtypes_dim_matchup)
+    dim_abbrev = pd.read_csv(dim_directory / 'dim_team_abbrev.csv', sep='|', dtype=dtypes_dim_abbrev)
+    dim_season = pd.read_csv(dim_directory / 'dim_season.csv', sep='|', dtype=dtypes_dim_season)
+
+    # get dtypes
+    dtypes_get = pd.read_csv(dtype_file,sep='|',dtype='object')
+    dtypes_dict = dict(zip(dtypes_get['col_name'], dtypes_get['type']))
+
+    raw_data = pd.read_csv(raw_data_file, sep='|', dtype=dtypes_dict)
+    processed_data = raw_data.copy()
+    processed_data = processed_data.merge(dim_season[['SEASON_ID', 'SEASON_NUMBER']], how='left', on='SEASON_ID')
+
+    processed_data = merge_with_prefix_or_suffix(processed_data, dim_abbrev[['TEAM_ABBREVIATION', 'TEAM_NUMBER', 'TEAM_ID']],
+        suffix='_HOME',
+        how = 'left',
+        left_on = 'TEAM_ABBREVIATION_HOME',
+        right_on = 'TEAM_ABBREVIATION',
+        keep_cols=['TEAM_ID', 'TEAM_NUMBER']
+        )
+
+    processed_data = merge_with_prefix_or_suffix(processed_data, dim_abbrev[['TEAM_ABBREVIATION', 'TEAM_NUMBER', 'TEAM_ID']],
+        suffix='_AWAY',
+        how = 'left',
+        left_on = 'TEAM_ABBREVIATION_AWAY',
+        right_on = 'TEAM_ABBREVIATION',
+        keep_cols=['TEAM_ID', 'TEAM_NUMBER'])
+
+    processed_data = processed_data.merge(dim_abbrev[['TEAM_ABBREVIATION', 'TEAM_NUMBER']],
+        how = 'left',
+        on = 'TEAM_ABBREVIATION')
+
+
+    # drop rows that have team_number_away = NaN or team_number_home = NaN
+    drop_rows1 = processed_data['TEAM_NUMBER_AWAY'].isna()
+    drop_rows2 = processed_data['TEAM_NUMBER_HOME'].isna()
+    drop_rows3 = processed_data['TEAM_NUMBER'].isna()
+    drop_rows = [x1 or x2 or x3 for x1, x2, x3 in zip(drop_rows1, drop_rows2, drop_rows3)]
+    processed_data = processed_data[np.logical_not(drop_rows)]
+
+    cols_to_int = ['TEAM_NUMBER', 'TEAM_NUMBER_HOME', 'TEAM_NUMBER_AWAY']
+
+    processed_data[cols_to_int] = processed_data[cols_to_int].fillna(-1).astype('int64')
+
+    processed_data = processed_data.merge(dim_matchup[['TEAM_NUMBER_HOME', 'TEAM_NUMBER_AWAY', 'MATCHUP_NUMBER', 'PAIRING_NUMBER']], how='left', on=['TEAM_NUMBER_HOME', 'TEAM_NUMBER_AWAY'])
+
+    processed_data['GAME_DATE'] = [dt.datetime.strptime(s, '%Y-%m-%d').date() for s in processed_data['GAME_DATE']]
+
+
+    processed_data = processed_data.merge(dim_game[['GAME_ID', 'GAME_NUMBER']], how='left', on='GAME_ID')
+
+    processed_data.to_csv(out_dir / out_file_name, sep='|', index=False)
+
+    dtypes = pd.DataFrame({'col_name':processed_data.columns, 'type':processed_data.dtypes})
+
+    dtypes.to_csv(out_dir / (left(out_file_name, len(out_file_name)-4) + '_dtypes.csv'), sep='|')
+
+    return(processed_data)
+
+def generate_dim_tables(raw_data_file, dim_directory, dtype_file):
+    ###########
+    # seasons
+    ###########
+    dtypes = get_dtypes_dict(dtype_file)
+    team_game_data = pd.read_csv(raw_data_file, sep='|', dtype=dtypes)
+    dim_season = team_game_data.groupby(['SEASON_ID', 'SEASON_TYPE']).agg(
+        min_GAME_DATE = ('GAME_DATE', 'min'),
+        max_GAME_DATE = ('GAME_DATE', 'max'),
+        nunique_GAME_ID = ('GAME_ID', 'nunique'),
+        ).sort_values('min_GAME_DATE').reset_index()
+
+    date_cols = ['min_GAME_DATE', 'max_GAME_DATE']
+
+    dim_season[date_cols] = dim_season[date_cols].apply(pd.to_datetime, errors='raise')
+
+    dim_season[date_cols] = dim_season[date_cols].apply(lambda x: x.dt.date)
+
+    dim_season['START_YEAR'] = [x.year for x in dim_season['min_GAME_DATE']]
+    dim_season['END_YEAR'] = [x.year for x in dim_season['max_GAME_DATE']]
+    dim_season['DURATION_DAYS'] = [(y - x).days + 1 for x, y in zip(dim_season['min_GAME_DATE'], dim_season['max_GAME_DATE'])]
+
+    dim_season['SEASON_NUMBER'] = np.arange(len(dim_season))
+    dim_season['SEASON_NAME'] = [t + ' ' + str(y) for t,y in zip(dim_season['SEASON_TYPE'], dim_season['START_YEAR'])]
+
+    dim_season['NEXT_REGULAR_SEASON_NAME'] = ['Regular Season ' + str(y + 1) if st == 'Regular Season' else 'Regular Season ' + str(y) if st == 'Pre Season' else NULL for st, y in zip(dim_season['SEASON_TYPE'], dim_season['START_YEAR']) ]
+
+    dim_season['NEXT_PRE_SEASON_NAME'] = ['Pre Season ' + str(y + 1) if st == 'Pre Season' else 'Pre Season ' + str(y + 1) if st == 'Regular Season' else NULL for st, y in zip(dim_season['SEASON_TYPE'], dim_season['START_YEAR']) ]
+
+    dim_season['PREVIOUS_REGULAR_SEASON_NAME'] = ['Regular Season ' + str(y - 1) if st == 'Regular Season' else 'Regular Season ' + str(y - 1) if st == 'Pre Season' else NULL for st, y in zip(dim_season['SEASON_TYPE'], dim_season['START_YEAR']) ]
+
+    dim_season['PREVIOUS_PRE_SEASON_NAME'] = ['Pre Season ' + str(y) if st == 'Regular Season' else 'Pre Season ' + str(y - 1) if st == 'Pre Season' else NULL for st, y in zip(dim_season['SEASON_TYPE'], dim_season['START_YEAR']) ]
+
+    dim_season= merge_with_prefix_or_suffix(dim_season, dim_season[['SEASON_NAME', 'SEASON_NUMBER']],
+        prefix='NEXT_REGULAR_',
+        how = 'left',
+        left_on = 'NEXT_REGULAR_SEASON_NAME',
+        right_on = 'SEASON_NAME',
+        keep_cols = ['SEASON_NUMBER']
+        )
+
+    dim_season= merge_with_prefix_or_suffix(dim_season, dim_season[['SEASON_NAME', 'SEASON_NUMBER']],
+        prefix='NEXT_PRE_',
+        how = 'left',
+        left_on = 'NEXT_PRE_SEASON_NAME',
+        right_on = 'SEASON_NAME',
+        keep_cols = ['SEASON_NUMBER'])
+
+    dim_season= merge_with_prefix_or_suffix(dim_season, dim_season[['SEASON_NAME', 'SEASON_NUMBER']],
+        prefix='PREVIOUS_REGULAR_',
+        how = 'left',
+        left_on = 'PREVIOUS_REGULAR_SEASON_NAME',
+        right_on = 'SEASON_NAME',
+        keep_cols = ['SEASON_NUMBER'])
+
+    dim_season= merge_with_prefix_or_suffix(dim_season, dim_season[['SEASON_NAME', 'SEASON_NUMBER']],
+        prefix='PREVIOUS_PRE_',
+        how = 'left',
+        left_on = 'PREVIOUS_PRE_SEASON_NAME',
+        right_on = 'SEASON_NAME',
+        keep_cols = ['SEASON_NUMBER'])
+
+
+    cols_to_int = ['NEXT_REGULAR_SEASON_NUMBER', 'NEXT_PRE_SEASON_NUMBER', 'PREVIOUS_REGULAR_SEASON_NUMBER', 'PREVIOUS_PRE_SEASON_NUMBER']
+
+    dim_season[cols_to_int] = dim_season[cols_to_int].fillna(-1).astype('int64')
+
+    team_game_data = team_game_data.merge(dim_season[['SEASON_ID', 'SEASON_NUMBER']], how='left', on='SEASON_ID')
+
+    dim_season.to_csv(dim_directory / 'dim_season.csv',  sep='|', index=False)
+
+
+    dtypes_dim_season = pd.DataFrame({'col_name':dim_season.columns, 'type':dim_season.dtypes})
+    dtypes_dim_season.to_csv(dim_directory / 'dim_season_dtypes.csv', sep='|', index=False)
+
+
+    ###########
+    # teams
+    ###########
+    dim_team = team_game_data[team_game_data['team_recency_rank'] == 1][['TEAM_ID', 'TEAM_ABBREVIATION', 'TEAM_NAME']]
+
+    dim_team['TEAM_NUMBER'] = np.arange(len(dim_team))
+
+    dim_team.to_csv(dim_directory / 'dim_team.csv', sep='|', index=False)
+
+    dtypes_dim_team = pd.DataFrame({'col_name':dim_team.columns, 'type':dim_team.dtypes})
+    dtypes_dim_team.to_csv(dim_directory / 'dim_team_dtypes.csv', sep='|', index=False)
+
+    ###########
+    # team abbreviations
+    ###########
+
+    dim_team_alt_abbrev = team_game_data[['TEAM_ID', 'TEAM_ABBREVIATION']].drop_duplicates()
+
+    dim_team_alt_abbrev = merge_with_prefix_or_suffix(dim_team_alt_abbrev, dim_team[['TEAM_ID', 'TEAM_NUMBER']]
+        ,how='left'
+        ,left_on='TEAM_ID'
+        ,right_on='TEAM_ID'
+        ,keep_cols = ['TEAM_NUMBER']
+        )
+
+    dim_team_alt_abbrev.to_csv(dim_directory / 'dim_team_abbrev.csv', sep='|', index=False)
+
+    dtypes_dim_team_alt_abbrev = pd.DataFrame({'col_name':dim_team_alt_abbrev.columns, 'type':dim_team_alt_abbrev.dtypes})
+    dtypes_dim_team_alt_abbrev.to_csv(dim_directory / 'dim_team_alt_abbrev_dtypes.csv', sep='|', index=False)
+
+    # add team information to basic_team_data_table
+    team_game_data = merge_with_prefix_or_suffix(team_game_data, dim_team_alt_abbrev[['TEAM_ABBREVIATION', 'TEAM_NUMBER', 'TEAM_ID']],
+        suffix='_HOME',
+        how = 'left',
+        left_on = 'TEAM_ABBREVIATION_HOME',
+        right_on = 'TEAM_ABBREVIATION',
+        keep_cols=['TEAM_ID', 'TEAM_NUMBER']
+        )
+
+    team_game_data = merge_with_prefix_or_suffix(team_game_data, dim_team_alt_abbrev[['TEAM_ABBREVIATION', 'TEAM_NUMBER', 'TEAM_ID']],
+        suffix='_AWAY',
+        how = 'left',
+        left_on = 'TEAM_ABBREVIATION_AWAY',
+        right_on = 'TEAM_ABBREVIATION',
+        keep_cols=['TEAM_ID', 'TEAM_NUMBER'])
+
+    # drop rows that have team_number_away = NaN or team_number_home = NaN
+    drop_rows1 = team_game_data['TEAM_NUMBER_AWAY'].isna()
+    drop_rows2 = team_game_data['TEAM_NUMBER_HOME'].isna()
+    drop_rows = [x1 or x2 for x1, x2 in zip(drop_rows1, drop_rows2)]
+    team_game_data = team_game_data[np.logical_not(drop_rows)]
+
+    cols_to_int = ['TEAM_NUMBER_HOME', 'TEAM_NUMBER_AWAY']
+
+    team_game_data[cols_to_int] = team_game_data[cols_to_int].fillna(-1).astype('int64')
+
+    ###########
+    # matchups
+    ###########
+    dim_matchup = team_game_data.groupby(['TEAM_NUMBER_HOME', 'TEAM_NUMBER_AWAY']).size().reset_index().rename(columns={0:'count'}).drop('count',axis=1)
+
+    pairings = pd.DataFrame([[s1, s2] if s1 < s2 else [s2, s1] for s1, s2 in zip(dim_matchup['TEAM_NUMBER_HOME'], dim_matchup['TEAM_NUMBER_AWAY'])], columns = ['TEAM_NUMBER_PAIRING1', 'TEAM_NUMBER_PAIRING2'])
+
+    dim_matchup = pd.concat([dim_matchup, pairings], axis=1)
+
+    dim_matchup['MATCHUP_NUMBER'] = np.arange(len(dim_matchup))
+
+
+    team_game_data = team_game_data.merge(dim_matchup[['TEAM_NUMBER_HOME', 'TEAM_NUMBER_AWAY', 'MATCHUP_NUMBER']], how='left', on=['TEAM_NUMBER_HOME', 'TEAM_NUMBER_AWAY'])
+
+
+    # pairing (no home/away distinction)
+    dim_pairing = dim_matchup.groupby(['TEAM_NUMBER_PAIRING1', 'TEAM_NUMBER_PAIRING2']).size().reset_index().rename(columns={0:'count'}).drop('count',axis=1)
+
+    dim_pairing['PAIRING_NUMBER'] = np.arange(len(dim_pairing))
+
+    dim_matchup = dim_matchup.merge(dim_pairing, how='left', on=['TEAM_NUMBER_PAIRING1', 'TEAM_NUMBER_PAIRING2'])
+
+    dim_matchup.to_csv(dim_directory / 'dim_matchup.csv', sep='|', index=False)
+
+    dtypes_dim_matchup = pd.DataFrame({'col_name':dim_matchup.columns, 'type':dim_matchup.dtypes})
+    dtypes_dim_matchup.to_csv(dim_directory / 'dim_matchup_dtypes.csv', sep='|', index=False)
+
+    dim_pairing = merge_with_prefix_or_suffix(dim_pairing, dim_team[['TEAM_NUMBER', 'TEAM_ABBREVIATION']], how='left', left_on='TEAM_NUMBER_PAIRING1', right_on='TEAM_NUMBER', suffix='_PAIRING1')
+    dim_pairing = merge_with_prefix_or_suffix(dim_pairing, dim_team[['TEAM_NUMBER', 'TEAM_ABBREVIATION']], how='left', left_on='TEAM_NUMBER_PAIRING2', right_on='TEAM_NUMBER', suffix='_PAIRING2')
+    dim_pairing['PAIRING_NAME'] = [s1 + '_vs_' + s2 for s1, s2 in zip(dim_pairing['TEAM_ABBREVIATION_PAIRING1'], dim_pairing['TEAM_ABBREVIATION_PAIRING2'])]
+
+
+    dim_pairing.to_csv(dim_directory / 'dim_pairing.csv', sep='|', index=False)
+
+    dtypes_dim_pairing= pd.DataFrame({'col_name':dim_pairing.columns, 'type':dim_pairing.dtypes})
+    dtypes_dim_pairing.to_csv(dim_directory / 'dim_pairing_dtypes.csv', sep='|', index=False)
+
+    team_game_data = team_game_data.merge(dim_matchup[['MATCHUP_NUMBER', 'PAIRING_NUMBER']], how='left', on='MATCHUP_NUMBER')
+
+
+    ###########
+    # games
+    ###########
+
+    # convert game date col to date
+    team_game_data['GAME_DATE'] = [dt.datetime.strptime(s, '%Y-%m-%d').date() for s in team_game_data['GAME_DATE']]
+
+    dim_game = team_game_data.groupby(['GAME_ID', 'SEASON_ID', 'GAME_DATE', 'PAIRING_NUMBER', 'MATCHUP_NUMBER', 'TEAM_NUMBER_HOME', 'TEAM_NUMBER_AWAY']).size().reset_index().rename(columns={0:'count'}).drop('count',axis=1)
+
+    dim_game = dim_game.merge(dim_season[['SEASON_ID', 'SEASON_NUMBER', 'SEASON_TYPE', 'SEASON_NAME']], how='left', on='SEASON_ID')
+
+    dim_game['GAME_NUMBER'] = np.arange(len(dim_game))
+
+    dim_game.to_csv(dim_directory / 'dim_game.csv', sep='|', index=False)
+
+    dtypes_dim_game = pd.DataFrame({'col_name':dim_game.columns, 'type':dim_game.dtypes})
+    dtypes_dim_game.to_csv(dim_directory / 'dim_game_dtypes.csv', sep='|', index=False)
+
+    return_dict = {
+    'games':dim_game,
+    'teams':dim_team,
+    'pairings':dim_pairing,
+    'matchups':dim_matchup,
+    'team_abbreviations':dim_team_alt_abbrev,
+    'seasons':dim_season
+    }
+    return(return_dict)
+
+
+def pull_raw_team_game_data(seasons, out_dir, out_file_name, get_upcoming_games=True):
+
+    if not any([s in ALL_AVAILABLE_SEASONS for s in seasons]):
+        raise ValueError('Input vector seasons must be in ALL_AVAILABLE_SEASONS')
+
+        # regular season
+    team_data_basic_list_regseason = [get_basic_game_info(season=s) for s in seasons]
+
+    # preseason
+    team_data_basic_list_preseason = [get_basic_game_info(season=s, season_type = 'Pre Season') for s in seasons]
+
+    team_data_basic_regseason = pd.concat(team_data_basic_list_regseason)
+    team_data_basic_preseason = pd.concat(team_data_basic_list_preseason)
+
+    unique_regseason_teams = team_data_basic_regseason['TEAM_ID'].unique()
+
+    # keep only teams from preseason that are in regseason
+    keep_preseason_rows = [True if s in unique_regseason_teams else False for s in team_data_basic_preseason['TEAM_ID']]
+
+    team_data_basic_preseason = team_data_basic_preseason[keep_preseason_rows]
+
+    team_data_basic_regseason['SEASON_TYPE'] = 'Regular Season'
+    team_data_basic_preseason['SEASON_TYPE'] = 'Pre Season'
+
+    team_data_basic = pd.concat([team_data_basic_regseason, team_data_basic_preseason]).reset_index()
+
+    # add other helpful columns
+    team_data_basic['team_recency_rank'] = team_data_basic.sort_values(['GAME_DATE'], ascending=[False]).groupby(['TEAM_ID']).cumcount() + 1
+
+    matchup_split1 = pd.DataFrame([re.split(' @ ', s) for s in team_data_basic['MATCHUP']], columns=['TEAM_ABBREVIATION_AWAY1', 'TEAM_ABBREVIATION_HOME1'])
+
+    matchup_split2 = pd.DataFrame([re.split(' vs. ', s) for s in team_data_basic['MATCHUP']], columns=['TEAM_ABBREVIATION_HOME2', 'TEAM_ABBREVIATION_AWAY2'])
+
+    matchup_splits = pd.concat([matchup_split1, matchup_split2], axis=1)
+
+    home_away_final = pd.DataFrame([[s1, s2] if s1 is not None and s2 is not None else [s3, s4] for s1, s2, s3, s4 in zip(matchup_splits['TEAM_ABBREVIATION_AWAY1'], matchup_splits['TEAM_ABBREVIATION_HOME1'], matchup_splits['TEAM_ABBREVIATION_AWAY2'], matchup_splits['TEAM_ABBREVIATION_HOME2'])], columns=['TEAM_ABBREVIATION_AWAY', 'TEAM_ABBREVIATION_HOME'])
+
+    team_data_basic = pd.concat([team_data_basic, home_away_final], axis=1)
+
+    team_data_basic.reset_index()
+
+
+    ##################################
+    # get upcoming games
+    ##################################
+    if get_upcoming_games:
+        upcoming_games_year = int(left(UPCOMING_SEASON, 4))
+        game_sched_full = get_full_game_schedule(upcoming_games_year, skeleton=True)
+        game_ids_new = set(game_sched_full['GAME_ID']) - set(team_data_basic['GAME_ID'])
+
+        keep_rows = [True if s in game_ids_new else False for s in game_sched_full['GAME_ID']]
+        game_sched_full = game_sched_full[keep_rows]
+
+        team_data_basic = pd.concat([team_data_basic, game_sched_full], sort=True)
+
+    team_data_basic.to_csv(out_dir / out_file_name, sep='|', index=False)
+
+    dtypes = pd.DataFrame({'col_name':team_data_basic.columns, 'type':team_data_basic.dtypes})
+
+    dtypes.to_csv(out_dir / (left(out_file_name, len(out_file_name)-4) + '_dtypes.csv'), sep='|', index=False)
+
+    return(team_data_basic)
+
+
+def update_processed_data(base_data_file, new_data_file, dtype_file, merge_index_cols=['TEAM_NUMBER', 'GAME_NUMBER']):
+
+    # get dtypes
+    dtypes_get = pd.read_csv(dtype_file,sep='|',dtype='object')
+    dtypes_dict = dict(zip(dtypes_get['col_name'], dtypes_get['type']))
+
+
+    base_data = pd.read_csv(base_data_file, sep='|', dtype=dtypes_dict)
+    new_data = pd.read_csv(new_data_file, sep='|', dtype=dtypes_dict)
+
+    base_data.set_index(merge_index_cols, drop=False, inplace=True)
+    new_data.set_index(merge_index_cols, drop=False, inplace=True)
+    base_data.update(new_data)
+
+    base_data = base_data.astype(dtypes_dict)
+
+    base_data.to_csv(base_data_file, sep='|')
 
 
 data_location = '/Users/zach/Documents/git/nba_bets/data'
@@ -202,261 +548,38 @@ data_dir = Path(data_location)
 raw_dir = data_dir / 'raw'
 interim_dir = data_dir / 'interim'
 processed_dir = data_dir / 'processed'
+dim_dir = processed_dir / 'dim'
 
-# all seasons
-all_seasons = ['2007-08', '2008-09', '2009-10', '2010-11', '2011-12', '2012-13', '2013-14', '2014-15', '2015-16', '2016-17', '2017-18', '2018-19', '2019-20']
+base_raw_data_file_name = 'team_game_data_raw.csv'
 
-# regular season
-team_data_basic_list_regseason = [get_basic_game_info(season=s) for s in all_seasons]
+ALL_AVAILABLE_SEASONS = ['2007-08', '2008-09', '2009-10', '2010-11', '2011-12', '2012-13', '2013-14', '2014-15', '2015-16', '2016-17', '2017-18', '2018-19']
 
-# preseason
-team_data_basic_list_preseason = [get_basic_game_info(season=s, season_type = 'Pre Season') for s in all_seasons]
+UPCOMING_SEASON = '2019-20'
 
-team_data_basic_regseason = pd.concat(team_data_basic_list_regseason)
-team_data_basic_preseason = pd.concat(team_data_basic_list_preseason)
+seasons= ALL_AVAILABLE_SEASONS
 
-# keep only teams from preseason that are in regseason
-keep_preseason_rows = [True if s in team_data_basic_regseason['TEAM_ID'].unique() else False for s in team_data_basic_preseason['TEAM_ID']]
+team_data = pull_raw_team_game_data(seasons, out_dir = raw_dir, out_file_name=base_raw_data_file_name, get_upcoming_games=True)
 
-team_data_basic_preseason = team_data_basic_preseason[keep_preseason_rows]
+raw_data_file = raw_dir / base_raw_data_file
 
-team_data_basic_regseason['SEASON_TYPE'] = 'Regular Season'
-team_data_basic_preseason['SEASON_TYPE'] = 'Pre Season'
+dim_tables = generate_dim_tables(raw_data_file=raw_data_file, dim_directory=dim_dir, dtype_file=raw_dir / 'team_game_data_raw_dtypes.csv')
 
-team_data_basic = pd.concat([team_data_basic_regseason, team_data_basic_preseason]).reset_index()
+dtype_file_raw_team_data = raw_dir / (left(base_raw_data_file_name, len(base_raw_data_file_name)-4) + '_dtypes.csv')
 
-# add other helpful columns
-team_data_basic['team_recency_rank'] = team_data_basic.sort_values(['GAME_DATE'], ascending=[False]).groupby(['TEAM_ID']).cumcount() + 1
+processed_data = process_raw_team_game_data(raw_data_file=base_raw_data_file, dtype_file=dtype_file_raw_team_data,out_dir=processed_dir, out_file_name='team_game_data_processed.csv', dim_directory=dim_dir)
 
-matchup_split1 = pd.DataFrame([re.split(' @ ', s) for s in team_data_basic['MATCHUP']], columns=['TEAM_ABBREVIATION_AWAY1', 'TEAM_ABBREVIATION_HOME1'])
+processed_data2 = pd.read_csv(processed_dir / 'team_game_data_processed.csv', sep='|', dtype= get_dtypes_dict(processed_dir / 'team_game_data_processed_dtypes.csv'))
 
-matchup_split2 = pd.DataFrame([re.split(' vs. ', s) for s in team_data_basic['MATCHUP']], columns=['TEAM_ABBREVIATION_HOME2', 'TEAM_ABBREVIATION_AWAY2'])
 
-matchup_splits = pd.concat([matchup_split1, matchup_split2], axis=1)
+new_raw_data_file_name = 'team_game_data_raw_update.csv'
+team_data_new = pull_raw_team_game_data(['2018-19'], out_dir = raw_dir, out_file_name=new_raw_data_file_name, get_upcoming_games=False)
 
-home_away_final = pd.DataFrame([[s1, s2] if s1 is not None and s2 is not None else [s3, s4] for s1, s2, s3, s4 in zip(matchup_splits['TEAM_ABBREVIATION_AWAY1'], matchup_splits['TEAM_ABBREVIATION_HOME1'], matchup_splits['TEAM_ABBREVIATION_AWAY2'], matchup_splits['TEAM_ABBREVIATION_HOME2'])], columns=['TEAM_ABBREVIATION_AWAY', 'TEAM_ABBREVIATION_HOME'])
+base_data_file = processed_dir / 'team_game_data_processed.csv'
 
-team_data_basic = pd.concat([team_data_basic, home_away_final], axis=1)
+new_data_file = raw_dir / 'team_game_data_raw_update.csv'
 
-team_data_basic.reset_index()
+team_data_processed_new = process_raw_team_game_data(raw_data_file=new_data_file, out_dir=processed_dir, out_file_name='team_game_data_update_processed.csv', dim_directory=dim_dir)
 
-
-##################################
-# get upcoming games
-##################################
-
-game_sched_full = get_full_game_schedule(2019, skeleton=True)
-game_ids_new = set(game_sched_full['GAME_ID']) - set(team_data_basic['GAME_ID'])
-
-keep_rows = [True if s in game_ids_new else False for s in game_sched_full['GAME_ID']]
-game_sched_full = game_sched_full[keep_rows]
-
-team_data_basic = pd.concat([team_data_basic, game_sched_full], sort=True)
-
-##################################
-# make dimension tables
-##################################
-
-# seasons
-dim_season = team_data_basic.groupby(['SEASON_ID', 'SEASON_TYPE']).agg(
-    min_GAME_DATE = ('GAME_DATE', 'min'),
-    max_GAME_DATE = ('GAME_DATE', 'max'),
-    nunique_GAME_ID = ('GAME_ID', 'nunique'),
-    ).sort_values('min_GAME_DATE').reset_index()
-
-date_cols = ['min_GAME_DATE', 'max_GAME_DATE']
-
-dim_season[date_cols] = dim_season[date_cols].apply(pd.to_datetime, errors='raise')
-
-dim_season[date_cols] = dim_season[date_cols].apply(lambda x: x.dt.date)
-
-dim_season['START_YEAR'] = [x.year for x in dim_season['min_GAME_DATE']]
-dim_season['END_YEAR'] = [x.year for x in dim_season['max_GAME_DATE']]
-dim_season['DURATION_DAYS'] = [(y - x).days + 1 for x, y in zip(dim_season['min_GAME_DATE'], dim_season['max_GAME_DATE'])]
-
-dim_season['SEASON_NUMBER'] = np.arange(len(dim_season))
-dim_season['SEASON_NAME'] = [t + ' ' + str(y) for t,y in zip(dim_season['SEASON_TYPE'], dim_season['START_YEAR'])]
-
-dim_season['NEXT_REGULAR_SEASON_NAME'] = ['Regular Season ' + str(y + 1) if st == 'Regular Season' else 'Regular Season ' + str(y) if st == 'Pre Season' else NULL for st, y in zip(dim_season['SEASON_TYPE'], dim_season['START_YEAR']) ]
-
-dim_season['NEXT_PRE_SEASON_NAME'] = ['Pre Season ' + str(y + 1) if st == 'Pre Season' else 'Pre Season ' + str(y + 1) if st == 'Regular Season' else NULL for st, y in zip(dim_season['SEASON_TYPE'], dim_season['START_YEAR']) ]
-
-dim_season['PREVIOUS_REGULAR_SEASON_NAME'] = ['Regular Season ' + str(y - 1) if st == 'Regular Season' else 'Regular Season ' + str(y - 1) if st == 'Pre Season' else NULL for st, y in zip(dim_season['SEASON_TYPE'], dim_season['START_YEAR']) ]
-
-dim_season['PREVIOUS_PRE_SEASON_NAME'] = ['Pre Season ' + str(y) if st == 'Regular Season' else 'Pre Season ' + str(y - 1) if st == 'Pre Season' else NULL for st, y in zip(dim_season['SEASON_TYPE'], dim_season['START_YEAR']) ]
-
-dim_season= merge_with_prefix_or_suffix(dim_season, dim_season[['SEASON_NAME', 'SEASON_NUMBER']],
-    prefix='NEXT_REGULAR_',
-    how = 'left',
-    left_on = 'NEXT_REGULAR_SEASON_NAME',
-    right_on = 'SEASON_NAME',
-    keep_cols = ['SEASON_NUMBER']
-    )
-
-dim_season= merge_with_prefix_or_suffix(dim_season, dim_season[['SEASON_NAME', 'SEASON_NUMBER']],
-    prefix='NEXT_PRE_',
-    how = 'left',
-    left_on = 'NEXT_PRE_SEASON_NAME',
-    right_on = 'SEASON_NAME',
-    keep_cols = ['SEASON_NUMBER'])
-
-dim_season= merge_with_prefix_or_suffix(dim_season, dim_season[['SEASON_NAME', 'SEASON_NUMBER']],
-    prefix='PREVIOUS_REGULAR_',
-    how = 'left',
-    left_on = 'PREVIOUS_REGULAR_SEASON_NAME',
-    right_on = 'SEASON_NAME',
-    keep_cols = ['SEASON_NUMBER'])
-
-dim_season= merge_with_prefix_or_suffix(dim_season, dim_season[['SEASON_NAME', 'SEASON_NUMBER']],
-    prefix='PREVIOUS_PRE_',
-    how = 'left',
-    left_on = 'PREVIOUS_PRE_SEASON_NAME',
-    right_on = 'SEASON_NAME',
-    keep_cols = ['SEASON_NUMBER'])
-
-
-cols_to_int = ['NEXT_REGULAR_SEASON_NUMBER', 'NEXT_PRE_SEASON_NUMBER', 'PREVIOUS_REGULAR_SEASON_NUMBER', 'PREVIOUS_PRE_SEASON_NUMBER']
-
-dim_season[cols_to_int] = dim_season[cols_to_int].fillna(-1).astype('int64')
-
-team_data_basic = team_data_basic.merge(dim_season[['SEASON_ID', 'SEASON_NUMBER']], how='left', on='SEASON_ID')
-
-# dim_season.set_index('SEASON_NUMBER', inplace=True, drop=False)
-
-dim_season.to_csv(raw_dir / 'dim_season.csv',  sep='|', index=False)
-
-# teams
-# # get all teams
-# all_teams = teams.get_teams()
-dim_team = team_data_basic[team_data_basic['team_recency_rank'] == 1][['TEAM_ID', 'TEAM_ABBREVIATION', 'TEAM_NAME']]
-
-dim_team['TEAM_NUMBER'] = np.arange(len(dim_team))
-
-dim_team.to_csv(raw_dir / 'dim_team.csv', sep='|', index=False)
-
-dim_team_alt_abbrev = team_data_basic[['TEAM_ID', 'TEAM_ABBREVIATION']].drop_duplicates()
-dim_team_alt_abbrev = merge_with_prefix_or_suffix(dim_team_alt_abbrev, dim_team[['TEAM_ID', 'TEAM_NUMBER']]
-    ,how='left'
-    ,left_on='TEAM_ID'
-    ,right_on='TEAM_ID'
-    ,keep_cols = ['TEAM_NUMBER']
-    )
-
-# add team information to basic_team_data_table
-team_data_basic = merge_with_prefix_or_suffix(team_data_basic, dim_team_alt_abbrev[['TEAM_ABBREVIATION', 'TEAM_NUMBER', 'TEAM_ID']],
-    suffix='_HOME',
-    how = 'left',
-    left_on = 'TEAM_ABBREVIATION_HOME',
-    right_on = 'TEAM_ABBREVIATION',
-    keep_cols=['TEAM_ID', 'TEAM_NUMBER']
-    )
-
-team_data_basic = merge_with_prefix_or_suffix(team_data_basic, dim_team[['TEAM_ABBREVIATION', 'TEAM_NUMBER', 'TEAM_ID']],
-    suffix='_AWAY',
-    how = 'left',
-    left_on = 'TEAM_ABBREVIATION_AWAY',
-    right_on = 'TEAM_ABBREVIATION',
-    keep_cols=['TEAM_ID', 'TEAM_NUMBER'])
-
-# drop rows that have team_number_away = NaN or team_number_home = NaN
-drop_rows1 = team_data_basic['TEAM_NUMBER_AWAY'].isna()
-drop_rows2 = team_data_basic['TEAM_NUMBER_HOME'].isna()
-drop_rows = [x1 or x2 for x1, x2 in zip(drop_rows1, drop_rows2)]
-team_data_basic = team_data_basic[np.logical_not(drop_rows)]
-
-cols_to_int = ['TEAM_NUMBER_HOME', 'TEAM_NUMBER_AWAY']
-
-team_data_basic[cols_to_int] = team_data_basic[cols_to_int].fillna(-1).astype('int64')
-
-# matchups
-dim_matchup = team_data_basic.groupby(['TEAM_NUMBER_HOME', 'TEAM_NUMBER_AWAY']).size().reset_index().rename(columns={0:'count'}).drop('count',axis=1)
-
-pairings = pd.DataFrame([[s1, s2] if s1 < s2 else [s2, s1] for s1, s2 in zip(dim_matchup['TEAM_NUMBER_HOME'], dim_matchup['TEAM_NUMBER_AWAY'])], columns = ['TEAM_NUMBER_PAIRING1', 'TEAM_NUMBER_PAIRING2'])
-
-dim_matchup = pd.concat([dim_matchup, pairings], axis=1)
-
-dim_matchup['MATCHUP_NUMBER'] = np.arange(len(dim_matchup))
-
-
-dim_matchup.to_csv(raw_dir / 'dim_matchup.csv', sep='|', index=False)
-
-
-team_data_basic = team_data_basic.merge(dim_matchup[['TEAM_NUMBER_HOME', 'TEAM_NUMBER_AWAY', 'MATCHUP_NUMBER']], how='left', on=['TEAM_NUMBER_HOME', 'TEAM_NUMBER_AWAY'])
-
-
-# pairing (no home/away distinction)
-dim_pairing = dim_matchup.groupby(['TEAM_NUMBER_PAIRING1', 'TEAM_NUMBER_PAIRING2']).size().reset_index().rename(columns={0:'count'}).drop('count',axis=1)
-
-dim_pairing['PAIRING_NUMBER'] = np.arange(len(dim_pairing))
-
-dim_matchup = dim_matchup.merge(dim_pairing, how='left', on=['TEAM_NUMBER_PAIRING1', 'TEAM_NUMBER_PAIRING2'])
-
-dim_pairing = merge_with_prefix_or_suffix(dim_pairing, dim_team[['TEAM_NUMBER', 'TEAM_ABBREVIATION']], how='left', left_on='TEAM_NUMBER_PAIRING1', right_on='TEAM_NUMBER', suffix='_PAIRING1')
-dim_pairing = merge_with_prefix_or_suffix(dim_pairing, dim_team[['TEAM_NUMBER', 'TEAM_ABBREVIATION']], how='left', left_on='TEAM_NUMBER_PAIRING2', right_on='TEAM_NUMBER', suffix='_PAIRING2')
-dim_pairing['PAIRING_NAME'] = [s1 + '_vs_' + s2 for s1, s2 in zip(dim_pairing['TEAM_ABBREVIATION_PAIRING1'], dim_pairing['TEAM_ABBREVIATION_PAIRING2'])]
-
-
-dim_pairing.to_csv(raw_dir / 'dim_pairing.csv', sep='|', index=False)
-
-team_data_basic = team_data_basic.merge(dim_matchup[['MATCHUP_NUMBER', 'PAIRING_NUMBER']], how='left', on='MATCHUP_NUMBER')
-
-# games
-
-# convert game date col to date
-team_data_basic['GAME_DATE'] = [dt.datetime.strptime(s, '%Y-%m-%d').date() for s in team_data_basic['GAME_DATE']]
-
-dim_game = team_data_basic.groupby(['GAME_ID', 'SEASON_ID', 'GAME_DATE', 'PAIRING_NUMBER', 'MATCHUP_NUMBER', 'TEAM_NUMBER_HOME', 'TEAM_NUMBER_AWAY']).size().reset_index().rename(columns={0:'count'}).drop('count',axis=1)
-
-dim_game = dim_game.merge(dim_season[['SEASON_ID', 'SEASON_NUMBER', 'SEASON_TYPE', 'SEASON_NAME']], how='left', on='SEASON_ID')
-
-dim_game['GAME_NUMBER'] = np.arange(len(dim_game))
-
-dim_game.to_csv(raw_dir / 'dim_game.csv', sep='|', index=False)
-
-team_data_basic = team_data_basic.merge(dim_game[['GAME_ID', 'GAME_NUMBER']], how='left', on='GAME_ID')
-
-# assign next and previous game numbers
-team_data_basic = team_data_basic.merge(dim_team[['TEAM_ID', 'TEAM_NUMBER']], how='left', on='TEAM_ID')
-
-team_data_basic['TEAM_IS_HOME_TEAM'] = [1 if s1 == s2 else 0 for s1, s2 in zip(team_data_basic['TEAM_NUMBER'], team_data_basic['TEAM_NUMBER_HOME'])]
-
-team_data_basic['TEAM_IS_AWAY_TEAM'] = [1 if s1 == s2 else 0 for s1, s2 in zip(team_data_basic['TEAM_NUMBER'], team_data_basic['TEAM_NUMBER_AWAY'])]
-
-team_data_basic['TEAM_HOME_OR_AWAY'] = ['HOME' if t == 1 else 'AWAY' for t in team_data_basic['TEAM_IS_HOME_TEAM']]
-
-
-# drop rows with no valid win/loss
-drop_rows1 = team_data_basic['WL'].isna()
-drop_rows2 = [d <= dt.date.today() for d in team_data_basic['GAME_DATE']]
-drop_rows_wl = [l1 and l2 for l1,l2 in zip(drop_rows1, drop_rows2)]
-team_data_basic = team_data_basic[np.logical_not(drop_rows_wl)]
-
-# sort by team and game date
-team_data_basic.sort_values(by=['TEAM_NUMBER',  'GAME_DATE'], inplace=True)
-
-
-# team_data_basic['games_by_season_cumulative'] = team_data_basic.groupby(['TEAM_NUMBER', 'SEASON_NUMBER']).cumcount()+1
-
-# calculate stats
-
-# write dtypes to file
-dtypes_out = pd.DataFrame(team_data_basic.dtypes, columns=['t'])
-dtypes_out['col_name'] = dtypes_out.index
-
-
-dtypes_new = ['float64' if dtypes_out[dtypes_out['col_name'] == s]['t'][0] == 'object' and isinstance(team_data_basic[s][0], int) else dtypes_out[dtypes_out['col_name'] == s]['t'][0] for s in dtypes_out['col_name']]
-
-dtypes_out['t'] = dtypes_new
-
-dtypes_dict = dict(zip(dtypes_out['col_name'], dtypes_out['t']))
-
-team_data_basic = team_data_basic.astype(dtypes_dict)
-
-dtypes_out.to_csv(raw_dir / 'dtypes_game_data_by_team.csv', sep='|', index=False)
-
-# write team game data to file
-team_data_basic.to_csv(raw_dir / 'game_data_by_team.csv',  sep='|', index=False)
-
-
-
+new_processed_data_file = processed_dir / 'team_game_data_update_processed.csv'
+new_data_file = new_processed_data_file
 

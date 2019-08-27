@@ -24,6 +24,8 @@ import multiprocessing as mp
 from numpy.random import seed
 from functools import reduce
 
+import pickle
+
 from xgboost.sklearn import XGBClassifier, XGBModel
 from xgboost import plot_importance
 
@@ -40,13 +42,6 @@ from sklearn.model_selection import cross_val_score
 from sklearn.metrics import mean_squared_error
 from sklearn.metrics import r2_score
 from math import sqrt
-
-data_location = '/Users/zach/Documents/git/nba_bets/data/'
-in_delim = '|'
-
-data_dir = Path(data_location)
-processed_dir = data_dir / 'processed'
-raw_dir = data_dir / 'raw'
 
 
 ##################
@@ -79,55 +74,102 @@ def calc_model_performance(df, col_name_pred='pred', col_name_obs='obs',type='cl
 
     return(out)
 
-def assign_home_away_prob(train, test):
-    test['pred_prob_HOME'] = test['pred']
-    test['pred_prob_AWAY'] = 1 - test['pred_prob_HOME']
+def assign_home_away_prob(df, col_name_pred='pred'):
 
-    test['pred_prob_calib_HOME'] = test['pred_calib']
-    test['pred_prob_calib_AWAY'] = 1 - test['pred_prob_calib_HOME']
+    # predict probability of win
+    df['pred_prob_HOME'] = df[col_name_pred]
+    df['pred_prob_AWAY'] = 1 - df['pred_prob_HOME']
 
-    train['pred_prob_HOME'] = train['pred']
-    train['pred_prob_AWAY'] = 1 - train['pred_prob_HOME']
+    # predict win/lose
+    df['pred_win_HOME'] = (df[col_name_pred] >= 0.5)*1
+    df['pred_win_AWAY'] = 1 - df['pred_win_HOME']
 
-    train['pred_prob_calib_HOME'] = train['pred_calib']
-    train['pred_prob_calib_AWAY'] = 1 - train['pred_prob_calib_HOME']
+    return(df)
 
-    test['pred_win_HOME'] = (test['pred'] >= 0.5)*1
-    test['pred_win_AWAY'] = 1 - test['pred_win_HOME']
 
-    train['pred_win_HOME'] = (train['pred'] >= 0.5)*1
-    train['pred_win_AWAY'] = (train['pred'] >= 0.5)*1
+def predict_with_xgb_classifier(model_obj, dat, predictors=None):
+    dat_x = dat[predictors]
+    dat_x.columns = ['f'+str(i) for i in range(len(predictors))]
+    pred = model_obj.predict_proba(dat_x)[:,1]
+    return(pred)
 
-    test['pred_win_calib_HOME'] = (test['pred_calib'] >= 0.5)*1
-    test['pred_win_calib_AWAY'] = 1 - test['pred_win_calib_HOME']
+def train_xgb_classifier(dat, predictors, target_col, params):
 
-    train['pred_win_calib_HOME'] = (train['pred_calib'] >= 0.5)*1
-    train['pred_win_calib_AWAY'] = 1 - train['pred_win_calib_HOME']
+    if params['train_frac'] < 1.0:
+        sample_ind = np.random.choice(dat.shape[0], size=int(np.floor(params['train_frac']*dat.shape[0])),replace=False)
+        train_dat = dat.iloc[sample_ind,:].copy()
+        calib_ind = list(set(range(dat.shape[0])) - set(sample_ind))
+        calib_dat = dat.iloc[calib_ind,:].copy()
+        calib_dat_x = calib_dat[predictors]
+        calib_dat_x.columns = ['f'+str(i) for i in range(len(predictors))]
+    else:
+        train_dat = dat.copy()
 
-    return(train, test)
+    train_dat_x = train_dat[predictors]
+    train_dat_x.columns = ['f'+str(i) for i in range(len(predictors))]
+
+    mod = XGBClassifier(**params)
+    mod.fit(train_dat_x, train_dat[target_col])
+
+    if params['train_frac'] < 1.0:
+        mod = CalibratedClassifierCV(mod, method='sigmoid',cv='prefit')
+        mod.fit(calib_dat_x, calib_dat[target])
+
+    return(mod)
+
+def train_test_model(train_dat, test_dat, train_fn, pred_fn, predictors, calc_performance=True, return_data=True, return_model_object=True):
+
+    mod = train_fn(dat=train_dat, predictors=predictors, target_col=target, params=model_params)
+
+    test_dat['pred'] = pred_fn(model_obj=mod, dat=test_dat, predictors=predictors)
+
+    train_dat['pred'] = pred_fn(model_obj=mod, dat=train_dat, predictors=predictors)
+
+    test_dat = assign_home_away_prob(test_dat)
+    train_dat = assign_home_away_prob(train_dat)
+
+    return_dict = {
+        'performance':None,
+        'train_data':None,
+        'test_data':None,
+        'model_object':None
+    }
+
+    if calc_performance:
+        perf_test = calc_model_performance(test_dat, 'pred', target)
+        perf_train = calc_model_performance(train_dat, 'pred', target)
+
+        perf_all = pd.concat([perf_test, perf_train])
+        perf_all['dataset'] = ['test', 'train']
+        perf_all['model_type'] = type(mod).__name__
+
+        return_dict['performance'] = perf_all
+
+    if return_data:
+        return_dict['train_data'] = train_dat
+        return_dict['test_data'] = test_dat
+
+    if return_model_object:
+        return_dict['model_object'] = mod
+
+    return(return_dict)
+
 
 ##################
 # read in data
 ##################
-train_data_original = pd.read_csv(processed_dir / 'training_data.csv', in_delim)
 
-# limit to regular season
-train_data_reg = train_data_original[train_data_original['SEASON_TYPE'] == 'Regular Season']
-
-train_data_init = train_data_reg[[x1 >= 10 and x2 >= 10 for x1,x2 in zip(train_data_reg['TEAM_FEATURE_cumulative_count_GAME_NUMBER_HOME'], train_data_reg['TEAM_FEATURE_cumulative_count_GAME_NUMBER_AWAY'])]]
-
-train_data_init = train_data_init[train_data_init['GAME_DATE'] <= '2019-08-22']
-
-dim_season = pd.read_csv(raw_dir / 'dim_season.csv', sep='|')
-#train_data_init.to_csv(processed_dir / 'train_data_test.csv', sep=',')
-
-# train_data_init = train_data_init.merge(dim_season[['SEASON_NUMBER', 'min_GAME_DATE', 'max_GAME_DATE']], how='left', on='SEASON_NUMBER')
+data_location = '/Users/zach/Documents/git/nba_bets/data/'
+in_delim = '|'
 
 target = 'WIN_HOME'
 
-
 predictors = [
-'TEAM_FEATURE_cumulative_count_GAME_NUMBER_AWAY'
+'TEAM_FEATURE_cumulative_win_pct_COURT_HOME'
+,'TEAM_FEATURE_cumulative_win_pct_COURT_AWAY'
+,'TEAM_FEATURE_cumulative_win_pct_HOME'
+,'TEAM_FEATURE_cumulative_win_pct_AWAY'
+,'TEAM_FEATURE_cumulative_count_GAME_NUMBER_AWAY'
 ,'TEAM_FEATURE_cumulative_count_GAME_NUMBER_HOME'
 ,'TEAM_FEATURE_TEAM_IS_HOME_TEAM_cumulative_sum_AWAY'
 ,'TEAM_FEATURE_TEAM_IS_HOME_TEAM_cumulative_sum_HOME'
@@ -263,19 +305,51 @@ predictors = [
 model_param_dict = {
     'learning_rate':[0.05],
     'n_estimators':[25],
-    'max_depth':[5],
+    'max_depth':[5, 7],
     'min_child_weight':[1],
     'gamma':[0.5],
     'subsample':[0.8],
-    'colsample_bytree':[1.0],
+    'colsample_bytree':[1.0, 0.8],
     'objective':['binary:logistic'],
     'nthread':[1],
     'scale_pos_weight':[1],
-    'seed':[29]
-    ,'train_frac':[0.8]
+    'seed':[29],
+    'train_frac':[0.8],
 }
 
 
+model_param_row_number = 0
+
+##################
+# get model parameters
+##################
+model_param_names = sorted(model_param_dict)
+model_param_combinations = it.product(*(model_param_dict[Name] for Name in model_param_names))
+model_param_list = list(model_param_combinations)
+model_param_df = pd.DataFrame(model_param_list, columns=model_param_names)
+
+model_param_df_row = model_param_df.iloc[[model_param_row_number],:]
+model_params = {key:val for key, val in zip(model_param_df_row.columns.values, model_param_df_row.iloc[0])}
+
+
+##################
+# read in data
+##################
+
+data_dir = Path(data_location)
+processed_dir = data_dir / 'processed'
+raw_dir = data_dir / 'raw'
+
+train_data_original = pd.read_csv(processed_dir / 'training_data.csv', in_delim)
+
+# limit to regular season
+train_data_reg = train_data_original[train_data_original['SEASON_TYPE'] == 'Regular Season']
+
+train_data_init = train_data_reg[[x1 >= 10 and x2 >= 10 for x1,x2 in zip(train_data_reg['TEAM_FEATURE_cumulative_count_GAME_NUMBER_HOME'], train_data_reg['TEAM_FEATURE_cumulative_count_GAME_NUMBER_AWAY'])]]
+
+train_data_init = train_data_init[train_data_init['GAME_DATE'] <= '2019-08-22']
+
+dim_season = pd.read_csv(raw_dir / 'dim_season.csv', sep='|')
 
 ##################
 # test model training
@@ -283,68 +357,25 @@ model_param_dict = {
 
 # prep
 min_date_train = '2007-11-21'
-max_date_train = '2017-04-12'
+max_date_train = '2016-04-13'
 
-min_date_test = '2017-10-17'
-max_date_test = '2018-04-11'
+min_date_test = '2016-10-25'
+max_date_test = '2017-04-12'
 
-train_frac = 0.8
 
 train_dat = train_data_init[(train_data_init['GAME_DATE'] >= min_date_train) & (train_data_init['GAME_DATE'] <= max_date_train)]
 
 test_dat = train_data_init[(train_data_init['GAME_DATE'] >= min_date_test) & (train_data_init['GAME_DATE'] <= max_date_test)]
 
+calc_performance = True
+return_data = True
+return_model_object = True
 
-model_param_names = sorted(model_param_dict)
-model_param_combinations = it.product(*(model_param_dict[Name] for Name in model_param_names))
-model_param_list = list(model_param_combinations)
-model_param_df = pd.DataFrame(model_param_list, columns=model_param_names)
-
-model_param_df_row = model_param_df.iloc[[0],:]
-model_params = {key:val for key, val in zip(model_param_df_row.columns.values, model_param_df_row.iloc[0])}
+train_fn = train_xgb_classifier
+pred_fn = predict_with_xgb_classifier
 
 
-# train model
-np.random.seed(0)
-sample_ind = np.random.choice(train_dat.shape[0], size=int(np.floor(train_frac*train_dat.shape[0])),replace=False)
 
-train1 = train_dat.iloc[sample_ind,:].copy()
+results = train_test_model(train_dat=train_dat, test_dat=test_dat, train_fn=train_xgb_classifier, pred_fn=predict_with_xgb_classifier, predictors=predictors)
 
-calib_ind = list(set(range(train_dat.shape[0])) - set(sample_ind))
-calib1 = train_dat.iloc[calib_ind,:].copy()
-
-# train
-train1_x = train1[predictors]
-train1_x.columns = ['f'+str(i) for i in range(len(predictors))]
-
-calib1_x = calib1[predictors]
-calib1_x.columns = ['f'+str(i) for i in range(len(predictors))]
-
-test1_x = test_dat[predictors]
-test1_x.columns = ['f'+str(i) for i in range(len(predictors))]
-
-#random.seed(seed)
-mod1 = XGBClassifier(**model_params)
-mod1.fit(train1_x, train1[target])
-
-mod_calib = CalibratedClassifierCV(mod1, method='sigmoid',cv='prefit')
-mod_calib.fit(calib1_x, calib1[target])
-
-test_dat['pred'] = mod1.predict_proba(test1_x)[:,1]
-train1['pred'] = mod1.predict_proba(train1_x)[:,1]
-
-test_dat['pred_calib'] = mod_calib.predict_proba(test1_x)[:,1]
-train1['pred_calib'] = mod_calib.predict_proba(train1_x)[:,1]
-
-
-train1, test_dat = assign_home_away_prob(train1, test_dat)
-
-perf_test = calc_model_performance(test_dat, 'pred', target)
-perf_calib_test = calc_model_performance(test_dat, 'pred_calib', target)
-perf_train = calc_model_performance(train1, 'pred', target)
-perf_calib_train = calc_model_performance(train1, 'pred_calib', target)
-
-perf_all = pd.concat([perf_test, perf_calib_test, perf_train, perf_calib_train])
-perf_all['description'] = ['test', 'test_calib', 'train', 'train_calib']
-
-plot_xgb_feat_importance(mod1, predictors, 'gain', 'blue', 50)
+plot_xgb_feat_importance(mod, predictors, 'gain', 'blue', 30)

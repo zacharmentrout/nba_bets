@@ -172,6 +172,9 @@ ewma_features = mean_features
 
 team_data=calc_groupby_feature(team_data, calc_stat_ewma, ewma_features, groupby_col= ['TEAM_NUMBER', 'SEASON_NUMBER'], prefix='TEAM_FEATURE_', suffix='_ewma')
 
+ # add features
+team_data['TEAM_FEATURE_cumulative_win_pct'] = team_data['TEAM_FEATURE_WIN_cumulative_sum'] / team_data['TEAM_FEATURE_cumulative_count_GAME_NUMBER']
+
 
 # calculate same features for home games vs. away
 team_data_home = team_data[team_data['TEAM_IS_HOME_TEAM'] == 1]
@@ -200,8 +203,12 @@ team_data_away = calc_groupby_feature(team_data_away, calc_stat_expanding_mean, 
 team_data_home = calc_groupby_feature(team_data_home, calc_stat_ewma, ewma_features, groupby_col= ['TEAM_NUMBER', 'SEASON_NUMBER'], prefix='TEAM_FEATURE_', suffix='_ewma_HOME')
 team_data_away= calc_groupby_feature(team_data_away, calc_stat_ewma, ewma_features, groupby_col= ['TEAM_NUMBER', 'SEASON_NUMBER'], prefix='TEAM_FEATURE_', suffix='_ewma_AWAY')
 
-# add targets
+# win pct
+team_data_home['TEAM_FEATURE_cumulative_win_pct_HOME'] = team_data_home['TEAM_FEATURE_WIN_cumulative_sum'] / team_data_home['TEAM_FEATURE_cumulative_count_GAME_NUMBER']
+team_data_away['TEAM_FEATURE_cumulative_win_pct_AWAY'] = team_data_away['TEAM_FEATURE_WIN_cumulative_sum'] / team_data_away['TEAM_FEATURE_cumulative_count_GAME_NUMBER']
 
+
+# add targets
 home_cols = [s for s in team_data_home.columns if s.endswith('_HOME') and s.startswith(('TEAM_FEATURE_', 'GAME_NUMBER_', 'TARGET_'))]
 away_cols = [s for s in team_data_away.columns if s.endswith('_AWAY') and s.startswith(('TEAM_FEATURE_', 'GAME_NUMBER_', 'TARGET'))]
 
@@ -224,8 +231,7 @@ team_data = pd.concat([team_data, court_col_df], axis=1)
 team_data['WIN_HOME'] = team_data['TEAM_IS_HOME_TEAM'] * team_data['WIN'] + team_data['TEAM_IS_AWAY_TEAM'] * team_data['LOSE']
 team_data['WIN_AWAY'] = 1 - team_data['WIN_HOME']
 
-team_data.to_csv(raw_dir / 'features_check.csv',  sep=',', index=False)
-
+#team_data.to_csv(raw_dir / 'features_check.csv',  sep=',', index=False)
 
 # pivot on home_vs_away
 
