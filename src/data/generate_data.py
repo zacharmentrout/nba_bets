@@ -13,6 +13,8 @@ import datetime as dt
 import traceback
 import time
 import re
+import json
+import math
 
 
 # To do
@@ -32,6 +34,17 @@ from nba_api.stats.endpoints.boxscoreusagev2 import BoxScoreUsageV2
 from nba_api.stats.endpoints.boxscoremiscv2 import BoxScoreMiscV2
 from nba_api.stats.endpoints.teamgamelog import TeamGameLog
 from nba_api.stats.endpoints.scoreboardv2 import ScoreboardV2
+
+def odds2prob_ml(odds):
+    if math.isnan(odds):
+        return(float('nan'))
+    if odds < 0:
+        return(-odds / (-odds + 100))
+    return(100 / (odds + 100))
+
+def convert_odds_american_to_decimal(odds):
+    return(1/odds2prob_ml(odds))
+
 
 def transform_stats_df(stats_df, df_index, stats_obj_class):
     if stats_obj_class == BoxScoreTraditionalV2 and df_index == 2:
@@ -548,7 +561,9 @@ data_dir = Path(data_location)
 raw_dir = data_dir / 'raw'
 interim_dir = data_dir / 'interim'
 processed_dir = data_dir / 'processed'
+external_dir = data_dir / 'external'
 dim_dir = processed_dir / 'dim'
+
 
 base_raw_data_file_name = 'team_game_data_raw.csv'
 
@@ -583,3 +598,40 @@ team_data_processed_new = process_raw_team_game_data(raw_data_file=new_data_file
 new_processed_data_file = processed_dir / 'team_game_data_update_processed.csv'
 new_data_file = new_processed_data_file
 
+
+
+
+def convert_oddsportal_scrape_output_to_dataframe(odds_json_file):
+    with open(odds_file, "r") as read_file:
+        odds_dict = json.load(read_file)
+    seasons = odds_dict['league']['seasons']
+    odds_output_list = [pd.DataFrame(s['games']) for s in seasons if len(s['games']) > 0 ]
+    odds_output_df = pd.concat(odds_output_list)
+    return(odds_output_df)
+
+def process_oddsportal_scrape_output(odds_json_file, dim_team_file, dim_team_dtypes_file):
+    odds_df = convert_oddsportal_scrape_output_to_dataframe(odds_json_file)
+
+    cols_to_float = ['odds_home', 'odds_away']
+
+    odds_df[cols_to_float] = odds_df[cols_to_float].astype('float64')
+
+    odds_df['odds_dec_home'] = [convert_odds_american_to_decimal(x) for x in odds_df['odds_home']]
+    odds_df['odds_dec_away'] = [convert_odds_american_to_decimal(x) for x in odds_df['odds_away']]
+    odds_df['implied_prob_home'] = [odds2prob_ml(x) for x in odds_df['odds_home']]
+    odds_df['implied_prob_away'] = [odds2prob_ml(x) for x in odds_df['odds_away']]
+    odds_df['adj_implied_prob_home'] = [x / (x+y) for x,y in zip(odds_df['implied_prob_home'], odds_df['implied_prob_away'])]
+    odds_df['adj_implied_prob_away'] = [y / (x+y) for x,y in zip(odds_df['implied_prob_home'], odds_df['implied_prob_away'])]
+
+    dim_team_dtypes = get_dtypes_dict(dim_team_dtypes_file)
+    dim_team = pd.read_csv(dim_team_file, sep='|', dtype=dim_team_dtypes)
+
+    la_clippers_home_rows = odds_df['team_home'] == 'Los Angeles Clippers'
+    la_clippers_away_rows = odds_df['team_away'] == 'Los Angeles Clippers'
+
+    odds_df.loc[la_clippers_home_rows, 'team_home'] = 'LA Clippers'
+    odds_df.loc[la_clippers_away_rows, 'team_away'] = 'LA Clippers'
+
+    odds_df = merge_with_prefix_or_suffix(odds_df, dim_team[['TEAM_NUMBER', 'TEAM_NAME']], how='left', left_on='team_home', right_on='TEAM_NAME', suffix='_HOME')
+    odds_df = merge_with_prefix_or_suffix(odds_df, dim_team[['TEAM_NUMBER', 'TEAM_NAME']], how='left', left_on='team_away', right_on='TEAM_NAME', suffix='_AWAY')
+    return(odds_df)
