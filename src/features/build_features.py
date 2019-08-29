@@ -12,7 +12,7 @@ import math
 import re
 from pathlib import Path
 import numpy as np
-from datetime import datetime
+import datetime as dt
 from dateutil.parser import parse
 import featuretools as ft
 import copy
@@ -75,7 +75,7 @@ def make_court_col(df, s):
 def multiindex_pivot(df, columns=None, values=None):
     #https://github.com/pandas-dev/pandas/issues/23955
     names = list(df.index.names)
-    df = df.reset_index()
+    df = df.reset_index() # maybe remove the drop if this is problematic
     list_index = df[names].values
     tuples_index = [tuple(i) for i in list_index] # hashable
     df = df.assign(tuples_index=tuples_index)
@@ -85,6 +85,11 @@ def multiindex_pivot(df, columns=None, values=None):
     df.index = index
     return df
 
+def get_dtypes_dict(dtype_file, col_name_col_name='col_name', dtype_col_name='type'):
+    dtypes_get = pd.read_csv(dtype_file,sep='|',dtype='object')
+    dtypes_dict = dict(zip(dtypes_get[col_name_col_name], dtypes_get[dtype_col_name]))
+    return(dtypes_dict)
+
 
 # location of data directory
 data_location = '/Users/zach/Documents/git/nba_bets/data'
@@ -93,14 +98,27 @@ data_dir = Path(data_location)
 raw_dir = data_dir / 'raw'
 interim_dir = data_dir / 'interim'
 processed_dir = data_dir / 'processed'
+external_dir = data_dir / 'external'
+dim_dir = processed_dir / 'dim'
 
-# get dtypes
-dtypes_get = pd.read_csv(raw_dir / 'dtypes_game_data_by_team.csv',sep='|',dtype='object')
-dtypes_dict = dict(zip(dtypes_get['col_name'], dtypes_get['t']))
+team_data_file = processed_dir / 'team_game_data_processed.csv'
+team_data_dtypes_file = processed_dir / 'team_game_data_processed_dtypes.csv'
 
-# read in data
-team_data =  pd.read_csv(raw_dir / 'game_data_by_team.csv', sep = '|', dtype=dtypes_dict)
+odds_file = processed_dir / 'processed_odds.csv'
+odds_dtypes_file = processed_dir / 'processed_odds_dtypes.csv'
 
+team_data = pd.read_csv(team_data_file, sep='|', dtype= get_dtypes_dict(team_data_dtypes_file))
+
+odds_data = pd.read_csv(odds_file, sep='|', dtype= get_dtypes_dict(odds_dtypes_file))
+
+odds_cols = ['odds', 'odds_dec', 'implied_prob', 'adj_implied_prob']
+odds_cols_home = [x+'_home' for x in odds_cols]
+odds_cols_away = [x+'_away' for x in odds_cols]
+
+# team_data = team_data.merge(odds_data[odds_cols_home + odds_cols_away + ['GAME_DATE', 'TEAM_NUMBER_HOME', 'TEAM_NUMBER_AWAY']], how='left', on=['GAME_DATE', 'TEAM_NUMBER_HOME', 'TEAM_NUMBER_AWAY'])
+
+# team_data.to_csv(processed_dir / 'test_odds_merge.csv', sep=',', index=False)
+# odds_data.to_csv(processed_dir / 'test_odds.csv', sep=',', index=False)
 
 team_data.sort_values(by=['TEAM_NUMBER',  'GAME_DATE'], inplace=True)
 
@@ -108,6 +126,16 @@ team_data.sort_values(by=['TEAM_NUMBER',  'GAME_DATE'], inplace=True)
 team_data['GAME_NUMBER_prev_game'] = team_data.groupby(['TEAM_NUMBER', 'SEASON_NUMBER'])['GAME_NUMBER'].apply(lambda x:  x.shift(1))
 team_data['GAME_NUMBER_next_game'] = team_data.groupby(['TEAM_NUMBER', 'SEASON_NUMBER'])['GAME_NUMBER'].apply(lambda x:  x.shift(-1))
 
+team_data['TEAM_IS_HOME_TEAM'] = (team_data['TEAM_NUMBER'] == team_data['TEAM_NUMBER_HOME'])*1
+team_data['TEAM_IS_AWAY_TEAM'] = (team_data['TEAM_NUMBER'] == team_data['TEAM_NUMBER_AWAY'])*1
+team_data['TEAM_HOME_OR_AWAY'] = ['HOME' if x == 1 else 'AWAY' if y == 1 else NULL for x,y in zip(team_data['TEAM_IS_HOME_TEAM'], team_data['TEAM_IS_AWAY_TEAM'])]
+
+# add points home and away for use in feature calcs
+home_away_cols = ['PTS']
+team_data = team_data.merge(team_data[['GAME_NUMBER', 'TEAM_NUMBER']+home_away_cols], how='left', left_on=['GAME_NUMBER', 'TEAM_NUMBER_HOME'], right_on=['GAME_NUMBER', 'TEAM_NUMBER'], suffixes=['','_HOME'])
+team_data = team_data.merge(team_data[['GAME_NUMBER', 'TEAM_NUMBER']+home_away_cols], how='left', left_on=['GAME_NUMBER', 'TEAM_NUMBER_AWAY'], right_on=['GAME_NUMBER', 'TEAM_NUMBER'], suffixes=['','_AWAY'])
+
+team_data['PTS_TOTAL'] = team_data['PTS_HOME'] + team_data['PTS_AWAY']
 
 # calculate per-minute stats
 team_stats_per_min = [
@@ -127,6 +155,7 @@ team_stats_per_min = [
 ,'PF'
 ,'PLUS MINUS'
 ,'PTS'
+,'PTS_TOTAL'
 ,'REB'
 ,'STL'
 ,'TO'
@@ -152,10 +181,11 @@ team_data['TEAM_FEATURE_cumulative_count_GAME_NUMBER'] = team_data.groupby(['TEA
 cumsum_features = [
 'TEAM_IS_HOME_TEAM',
 'TEAM_IS_AWAY_TEAM',
-'MIN'
-,'WIN'
-,'LOSE'
-,'PTS'
+'MIN',
+'WIN',
+'LOSE',
+'PTS',
+'PTS_TOTAL'
 ]
 
 team_data = calc_groupby_feature(team_data, calc_stat_cumsum, cumsum_features, ['TEAM_NUMBER', 'SEASON_NUMBER'], prefix='TEAM_FEATURE_', suffix='_cumulative_sum')
@@ -165,7 +195,6 @@ team_data = calc_groupby_feature(team_data, calc_stat_cumsum, cumsum_features, [
 mean_features = [s + '_per_min' for s in team_stats_per_min]
 
 team_data = calc_groupby_feature(team_data, calc_stat_expanding_mean, mean_features, ['TEAM_NUMBER', 'SEASON_NUMBER'], prefix='TEAM_FEATURE_', suffix='_expanding_mean')
-
 
 # calculate exponentially weighted moving avg features
 ewma_features = mean_features
@@ -206,11 +235,13 @@ team_data_away= calc_groupby_feature(team_data_away, calc_stat_ewma, ewma_featur
 # win pct
 team_data_home['TEAM_FEATURE_cumulative_win_pct_HOME'] = team_data_home['TEAM_FEATURE_WIN_cumulative_sum'] / team_data_home['TEAM_FEATURE_cumulative_count_GAME_NUMBER']
 team_data_away['TEAM_FEATURE_cumulative_win_pct_AWAY'] = team_data_away['TEAM_FEATURE_WIN_cumulative_sum'] / team_data_away['TEAM_FEATURE_cumulative_count_GAME_NUMBER']
-
+# point pct of total
+team_data_home['TEAM_FEATURE_cumulative_pt_pct_HOME'] = team_data_home['TEAM_FEATURE_PTS_cumulative_sum'] / team_data_home['TEAM_FEATURE_PTS_TOTAL_cumulative_sum']
+team_data_away['TEAM_FEATURE_cumulative_pt_pct_AWAY'] = team_data_away['TEAM_FEATURE_PTS_cumulative_sum'] / team_data_away['TEAM_FEATURE_PTS_TOTAL_cumulative_sum']
 
 # add targets
 home_cols = [s for s in team_data_home.columns if s.endswith('_HOME') and s.startswith(('TEAM_FEATURE_', 'GAME_NUMBER_', 'TARGET_'))]
-away_cols = [s for s in team_data_away.columns if s.endswith('_AWAY') and s.startswith(('TEAM_FEATURE_', 'GAME_NUMBER_', 'TARGET'))]
+away_cols = [s for s in team_data_away.columns if s.endswith('_AWAY') and s.startswith(('TEAM_FEATURE_', 'GAME_NUMBER_', 'TARGET_'))]
 
 home_feature_cols = [s for s in home_cols if s.startswith('TEAM_FEATURE')]
 away_feature_cols = [s for s in away_cols if s.startswith('TEAM_FEATURE')]
@@ -250,8 +281,12 @@ new_names = [str(o[0])+'_'+str(o[1]) if o[1] != '' else o[0] for o in old_names]
 
 team_data_pivot.columns = new_names
 
+dupes = team_data_pivot.duplicated(subset='GAME_NUMBER')
+td_dupe = team_data_pivot[dupes]
+
 # add dim_game data
-dim_game = pd.read_csv(raw_dir / 'dim_game.csv', sep='|')
+dim_game_dtypes = get_dtypes_dict(dim_dir / 'dim_game_dtypes.csv')
+dim_game = pd.read_csv(dim_dir / 'dim_game.csv', sep='|', dtype=dim_game_dtypes)
 
 
 # training data full
@@ -259,9 +294,8 @@ dim_game = pd.read_csv(raw_dir / 'dim_game.csv', sep='|')
 train_data = dim_game.merge(team_data_pivot, how='left', on='GAME_NUMBER')
 
 
-train_data.to_csv(raw_dir / 'features_check2.csv',  sep=',', index=False)
+train_data.to_csv(raw_dir / 'features_check.csv',  sep=',', index=False)
 
 train_data.to_csv(processed_dir / 'training_data.csv',  sep='|', index=False)
 # to do:
-# add dim_game data
 # add other columns to pivot besides these

@@ -145,18 +145,20 @@ def get_boxscore_data(game_id, end_period=0, player_or_team='both',timeout=10, p
 def get_boxscore_data_from_data_frames(stats_obj, player_or_team='player'):
     dfs = stats_obj.get_data_frames()
 
-    if player_or_team == 'player':
-        stats_to_get = PLAYER_STATS_TO_GET[type(stats_obj)]
-        row_ids = ROW_IDS_PLAYER
-    elif player_or_team == 'team':
-        stats_to_get = TEAM_STATS_TO_GET[type(stats_obj)]
-        row_ids = ROW_IDS_TEAM
-    else:
-        raise ValueError('player_or_team argument must be one of {"player", "team"}')
+    # if player_or_team == 'player':
+    #     stats_to_get = PLAYER_STATS_TO_GET[type(stats_obj)]
+    #     row_ids = ROW_IDS_PLAYER
+    # elif player_or_team == 'team':
+    #     stats_to_get = TEAM_STATS_TO_GET[type(stats_obj)]
+    #     row_ids = ROW_IDS_TEAM
+    # else:
+    #     raise ValueError('player_or_team argument must be one of {"player", "team"}')
 
-    stats_list = [transform_stats_df(dfs[x][stats_to_get[x]], x, type(stats_obj)) for x in list(stats_to_get.keys())]
+    # stats_list = [transform_stats_df(dfs[x][stats_to_get[x]], x, type(stats_obj)) for x in list(stats_to_get.keys())]
 
-    stats_df = reduce(lambda x, y: pd.merge(x, y, on = row_ids), stats_list)
+    stats_list = dfs
+
+    stats_df = reduce(lambda x, y: pd.merge(x, y, on = ['GAME_ID', 'TEAM_ID']), stats_list)
 
     return stats_df
 
@@ -281,7 +283,7 @@ def generate_dim_tables(raw_data_file, dim_directory, dtype_file):
         min_GAME_DATE = ('GAME_DATE', 'min'),
         max_GAME_DATE = ('GAME_DATE', 'max'),
         nunique_GAME_ID = ('GAME_ID', 'nunique'),
-        ).sort_values('min_GAME_DATE').reset_index()
+        ).sort_values('min_GAME_DATE').reset_index(drop=True)
 
     date_cols = ['min_GAME_DATE', 'max_GAME_DATE']
 
@@ -406,7 +408,7 @@ def generate_dim_tables(raw_data_file, dim_directory, dtype_file):
     ###########
     # matchups
     ###########
-    dim_matchup = team_game_data.groupby(['TEAM_NUMBER_HOME', 'TEAM_NUMBER_AWAY']).size().reset_index().rename(columns={0:'count'}).drop('count',axis=1)
+    dim_matchup = team_game_data.groupby(['TEAM_NUMBER_HOME', 'TEAM_NUMBER_AWAY']).size().reset_index(drop=True).rename(columns={0:'count'}).drop('count',axis=1)
 
     pairings = pd.DataFrame([[s1, s2] if s1 < s2 else [s2, s1] for s1, s2 in zip(dim_matchup['TEAM_NUMBER_HOME'], dim_matchup['TEAM_NUMBER_AWAY'])], columns = ['TEAM_NUMBER_PAIRING1', 'TEAM_NUMBER_PAIRING2'])
 
@@ -419,7 +421,7 @@ def generate_dim_tables(raw_data_file, dim_directory, dtype_file):
 
 
     # pairing (no home/away distinction)
-    dim_pairing = dim_matchup.groupby(['TEAM_NUMBER_PAIRING1', 'TEAM_NUMBER_PAIRING2']).size().reset_index().rename(columns={0:'count'}).drop('count',axis=1)
+    dim_pairing = dim_matchup.groupby(['TEAM_NUMBER_PAIRING1', 'TEAM_NUMBER_PAIRING2']).size().reset_index(drop=True).rename(columns={0:'count'}).drop('count',axis=1)
 
     dim_pairing['PAIRING_NUMBER'] = np.arange(len(dim_pairing))
 
@@ -450,7 +452,7 @@ def generate_dim_tables(raw_data_file, dim_directory, dtype_file):
     # convert game date col to date
     team_game_data['GAME_DATE'] = [dt.datetime.strptime(s, '%Y-%m-%d').date() for s in team_game_data['GAME_DATE']]
 
-    dim_game = team_game_data.groupby(['GAME_ID', 'SEASON_ID', 'GAME_DATE', 'PAIRING_NUMBER', 'MATCHUP_NUMBER', 'TEAM_NUMBER_HOME', 'TEAM_NUMBER_AWAY']).size().reset_index().rename(columns={0:'count'}).drop('count',axis=1)
+    dim_game = team_game_data.groupby(['GAME_ID', 'SEASON_ID', 'GAME_DATE', 'PAIRING_NUMBER', 'MATCHUP_NUMBER', 'TEAM_NUMBER_HOME', 'TEAM_NUMBER_AWAY']).size().reset_index(drop=True).rename(columns={0:'count'}).drop('count',axis=1)
 
     dim_game = dim_game.merge(dim_season[['SEASON_ID', 'SEASON_NUMBER', 'SEASON_TYPE', 'SEASON_NAME']], how='left', on='SEASON_ID')
 
@@ -496,7 +498,16 @@ def pull_raw_team_game_data(seasons, out_dir, out_file_name, get_upcoming_games=
     team_data_basic_regseason['SEASON_TYPE'] = 'Regular Season'
     team_data_basic_preseason['SEASON_TYPE'] = 'Pre Season'
 
-    team_data_basic = pd.concat([team_data_basic_regseason, team_data_basic_preseason]).reset_index()
+    team_data_basic = pd.concat([team_data_basic_regseason, team_data_basic_preseason]).reset_index(drop=True)
+
+    drop_rows = team_data_basic['WL'].isna()
+    team_data_basic = team_data_basic[np.logical_not(drop_rows)]
+
+    game_team_count = team_data_basic.groupby('GAME_ID')['TEAM_ID'].count()
+    drop_games = set(game_team_count[game_team_count != 2].index)
+
+    drop_rows = [True if s in drop_games else False for s in team_data_basic['GAME_ID']]
+    team_data_basic = team_data_basic[np.logical_not(drop_rows)]
 
     # add other helpful columns
     team_data_basic['team_recency_rank'] = team_data_basic.sort_values(['GAME_DATE'], ascending=[False]).groupby(['TEAM_ID']).cumcount() + 1
@@ -505,13 +516,11 @@ def pull_raw_team_game_data(seasons, out_dir, out_file_name, get_upcoming_games=
 
     matchup_split2 = pd.DataFrame([re.split(' vs. ', s) for s in team_data_basic['MATCHUP']], columns=['TEAM_ABBREVIATION_HOME2', 'TEAM_ABBREVIATION_AWAY2'])
 
-    matchup_splits = pd.concat([matchup_split1, matchup_split2], axis=1)
+    matchup_splits = pd.concat([matchup_split1, matchup_split2], axis=1, ignore_index=False)
 
     home_away_final = pd.DataFrame([[s1, s2] if s1 is not None and s2 is not None else [s3, s4] for s1, s2, s3, s4 in zip(matchup_splits['TEAM_ABBREVIATION_AWAY1'], matchup_splits['TEAM_ABBREVIATION_HOME1'], matchup_splits['TEAM_ABBREVIATION_AWAY2'], matchup_splits['TEAM_ABBREVIATION_HOME2'])], columns=['TEAM_ABBREVIATION_AWAY', 'TEAM_ABBREVIATION_HOME'])
 
-    team_data_basic = pd.concat([team_data_basic, home_away_final], axis=1)
-
-    team_data_basic.reset_index()
+    team_data_basic = pd.concat([team_data_basic.reset_index(drop=True), home_away_final], axis=1)
 
 
     ##################################
@@ -555,66 +564,22 @@ def update_processed_data(base_data_file, new_data_file, dtype_file, merge_index
     base_data.to_csv(base_data_file, sep='|')
 
 
-data_location = '/Users/zach/Documents/git/nba_bets/data'
-
-data_dir = Path(data_location)
-raw_dir = data_dir / 'raw'
-interim_dir = data_dir / 'interim'
-processed_dir = data_dir / 'processed'
-external_dir = data_dir / 'external'
-dim_dir = processed_dir / 'dim'
-
-
-base_raw_data_file_name = 'team_game_data_raw.csv'
-
-ALL_AVAILABLE_SEASONS = ['2007-08', '2008-09', '2009-10', '2010-11', '2011-12', '2012-13', '2013-14', '2014-15', '2015-16', '2016-17', '2017-18', '2018-19']
-
-UPCOMING_SEASON = '2019-20'
-
-seasons= ALL_AVAILABLE_SEASONS
-
-team_data = pull_raw_team_game_data(seasons, out_dir = raw_dir, out_file_name=base_raw_data_file_name, get_upcoming_games=True)
-
-raw_data_file = raw_dir / base_raw_data_file
-
-dim_tables = generate_dim_tables(raw_data_file=raw_data_file, dim_directory=dim_dir, dtype_file=raw_dir / 'team_game_data_raw_dtypes.csv')
-
-dtype_file_raw_team_data = raw_dir / (left(base_raw_data_file_name, len(base_raw_data_file_name)-4) + '_dtypes.csv')
-
-processed_data = process_raw_team_game_data(raw_data_file=base_raw_data_file, dtype_file=dtype_file_raw_team_data,out_dir=processed_dir, out_file_name='team_game_data_processed.csv', dim_directory=dim_dir)
-
-processed_data2 = pd.read_csv(processed_dir / 'team_game_data_processed.csv', sep='|', dtype= get_dtypes_dict(processed_dir / 'team_game_data_processed_dtypes.csv'))
-
-
-new_raw_data_file_name = 'team_game_data_raw_update.csv'
-team_data_new = pull_raw_team_game_data(['2018-19'], out_dir = raw_dir, out_file_name=new_raw_data_file_name, get_upcoming_games=False)
-
-base_data_file = processed_dir / 'team_game_data_processed.csv'
-
-new_data_file = raw_dir / 'team_game_data_raw_update.csv'
-
-team_data_processed_new = process_raw_team_game_data(raw_data_file=new_data_file, out_dir=processed_dir, out_file_name='team_game_data_update_processed.csv', dim_directory=dim_dir)
-
-new_processed_data_file = processed_dir / 'team_game_data_update_processed.csv'
-new_data_file = new_processed_data_file
-
-
-
-
 def convert_oddsportal_scrape_output_to_dataframe(odds_json_file):
-    with open(odds_file, "r") as read_file:
+    with open(odds_json_file, "r") as read_file:
         odds_dict = json.load(read_file)
     seasons = odds_dict['league']['seasons']
     odds_output_list = [pd.DataFrame(s['games']) for s in seasons if len(s['games']) > 0 ]
     odds_output_df = pd.concat(odds_output_list)
     return(odds_output_df)
 
-def process_oddsportal_scrape_output(odds_json_file, dim_team_file, dim_team_dtypes_file):
+def process_oddsportal_scrape_output(odds_json_file, dim_team_file, dim_team_dtypes_file, out_dir=None, out_file_name=None):
     odds_df = convert_oddsportal_scrape_output_to_dataframe(odds_json_file)
 
     cols_to_float = ['odds_home', 'odds_away']
 
     odds_df[cols_to_float] = odds_df[cols_to_float].astype('float64')
+
+    odds_df['GAME_DATE'] = convert_string_to_date(odds_df['game_datetime'])
 
     odds_df['odds_dec_home'] = [convert_odds_american_to_decimal(x) for x in odds_df['odds_home']]
     odds_df['odds_dec_away'] = [convert_odds_american_to_decimal(x) for x in odds_df['odds_away']]
@@ -634,4 +599,60 @@ def process_oddsportal_scrape_output(odds_json_file, dim_team_file, dim_team_dty
 
     odds_df = merge_with_prefix_or_suffix(odds_df, dim_team[['TEAM_NUMBER', 'TEAM_NAME']], how='left', left_on='team_home', right_on='TEAM_NAME', suffix='_HOME')
     odds_df = merge_with_prefix_or_suffix(odds_df, dim_team[['TEAM_NUMBER', 'TEAM_NAME']], how='left', left_on='team_away', right_on='TEAM_NAME', suffix='_AWAY')
+
+    cols_to_int = ['TEAM_NUMBER_HOME', 'TEAM_NUMBER_AWAY']
+
+    odds_df[cols_to_int] = odds_df[cols_to_int].fillna(-1).astype('int64')
+
+    odds_df.drop_duplicates(subset=['game_datetime', 'TEAM_NUMBER_HOME', 'TEAM_NUMBER_AWAY'], inplace=True)
+
+    if out_dir is not None:
+        dtypes = pd.DataFrame({'col_name':odds_df.columns, 'type':odds_df.dtypes})
+        dtypes.to_csv(out_dir / (left(out_file_name, len(out_file_name)-4) + '_dtypes.csv'), sep='|', index=False)
+        odds_df.to_csv(out_dir / out_file_name, sep='|', index=False)
+
     return(odds_df)
+
+
+
+
+data_location = '/Users/zach/Documents/git/nba_bets/data'
+
+data_dir = Path(data_location)
+raw_dir = data_dir / 'raw'
+interim_dir = data_dir / 'interim'
+processed_dir = data_dir / 'processed'
+external_dir = data_dir / 'external'
+dim_dir = processed_dir / 'dim'
+
+
+base_raw_data_file_name = 'team_game_data_raw.csv'
+base_processed_data_file_name = 'team_game_data_processed.csv'
+odds_json_file = external_dir / 'nba/NBA.json'
+
+ALL_AVAILABLE_SEASONS = ['2007-08', '2008-09', '2009-10', '2010-11', '2011-12', '2012-13', '2013-14', '2014-15', '2015-16', '2016-17', '2017-18', '2018-19']
+
+UPCOMING_SEASON = '2019-20'
+
+seasons= ALL_AVAILABLE_SEASONS
+
+team_data = pull_raw_team_game_data(seasons, out_dir = raw_dir, out_file_name=base_raw_data_file_name, get_upcoming_games=True)
+
+
+base_raw_data_file = raw_dir / base_raw_data_file_name
+
+team_data_dtypes = get_dtypes_dict(raw_dir / 'team_game_data_raw_dtypes.csv')
+team_data = pd.read_csv(base_raw_data_file, sep='|', dtype=team_data_dtypes)
+team_data_dupes = team_data.duplicated(subset=['GAME_ID', 'TEAM_ID'])
+
+dim_tables = generate_dim_tables(raw_data_file=base_raw_data_file, dim_directory=dim_dir, dtype_file=raw_dir / 'team_game_data_raw_dtypes.csv')
+
+dtype_file_raw_team_data = raw_dir / (left(base_raw_data_file_name, len(base_raw_data_file_name)-4) + '_dtypes.csv')
+
+process_raw_team_game_data(raw_data_file=base_raw_data_file, dtype_file=dtype_file_raw_team_data,out_dir=processed_dir, out_file_name=base_processed_data_file_name, dim_directory=dim_dir)
+
+processed_data = pd.read_csv(processed_dir / 'team_game_data_processed.csv', sep='|', dtype= get_dtypes_dict(processed_dir / 'team_game_data_processed_dtypes.csv'))
+
+processed_odds = process_oddsportal_scrape_output(odds_json_file, dim_dir / 'dim_team.csv', dim_dir / 'dim_team_dtypes.csv', out_dir=processed_dir, out_file_name='processed_odds.csv')
+
+
