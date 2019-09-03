@@ -86,11 +86,18 @@ def assign_home_away_prob(df, col_name_pred='pred'):
 
     return(df)
 
+def assign_home_away_prob_with_xgb_classifier(model_obj, dat, predictors):
+    dat['pred'] = predict_with_xgb_classifier(model_obj, dat, predictors)
+    out_df = pd.DataFrame(zip(dat['pred'], 1 - dat['pred']), columns=['pred_prob_HOME', 'pred_prob_AWAY'])
+
+    return(out_df)
+
+
 
 def predict_with_xgb_classifier(model_obj, dat, predictors=None):
     dat_x = dat[predictors]
     dat_x.columns = ['f'+str(i) for i in range(len(predictors))]
-    pred = model_obj.predict_proba(dat_x)[:,1]
+    pred = (model_obj.predict_proba(dat_x))[:,1]
     return(pred)
 
 def train_xgb_classifier(dat, predictors, target_col, params):
@@ -154,6 +161,84 @@ def train_test_model(train_dat, test_dat, train_fn, pred_fn, predictors, calc_pe
 
     return(return_dict)
 
+
+class Modeler:
+    def __init__(self, parameters, training_data, training_function, prediction_function, performance_function, predictors, target, prediction_col='pred', prob_home_col='prob_WIN_HOME', prob_away_col='prob_WIN_AWAY'):
+        self.parameters = parameters
+        self.training_data = training_data
+        self.training_function = training_function
+        self.prediction_function = prediction_function
+        self.performance_function = performance_function
+        self.predictors = predictors
+        self.target = target
+        self.model_object = None
+        self.prediction_col = prediction_col
+        self.prob_home_col = prob_home_col
+        self.prob_away_col = prob_away_col
+
+    def train_model(self):
+        self.model_object = self.training_function(self.training_data, self.predictors, self.target, self.parameters)
+
+    def predict(self, test_data):
+        preds = self.prediction_function(self.model_object, test_data, self.predictors)
+        return(preds)
+
+    def assign_home_away_probabilities(self, dat):
+        dat[self.prob_home_col] = dat[self.prediction_col]
+        dat[self.prob_away_col] = 1 - dat[self.prob_home_col]
+        return(dat)
+
+class Strategy:
+    def __init__(self, parameters, bet_recommendation_function, performance_function, odds_home_col='odds_dec_home', odds_away_col='odds_dec_away', bet_home_col='place_bet_HOME', bet_away_col='place_bet_AWAY'):
+        self.parameters = parameters
+        self.bet_recommendation_function = bet_recommendation_function
+        self.performance_function = performance_function
+        self.odds_home_col = odds_home_col
+        self.odds_away_col = odds_away_col
+        self.bet_home_col = bet_home_col
+        self.bet_away_col = bet_away_col
+
+    def recommend_bets(self, test_data, **kwargs):
+        return(self.bet_recommendation_function(test_data, **kwargs))
+
+    def calc_performance(self, test_data, **kwargs):
+        return(self.performance_function(test_data, **kwargs))
+
+# TODO add modeler/strategy init
+class Recommender:
+    def __init__(self, parameters, training_data, training_function,  prediction_function, model_performance_function, predictors, target, bet_recommendation_function, bet_performance_function, prediction_col='pred', prob_home_col='prob_WIN_HOME', prob_away_col='prob_WIN_AWAY', odds_home_col='odds_dec_home', odds_away_col='odds_dec_away', bet_home_col='place_bet_HOME', bet_away_col='place_bet_AWAY'):
+
+        self.parameters = parameters
+        self.modeler = Modeler(parameters, training_data, training_function, prediction_function, model_performance_function, predictors, target, prob_home_col, prob_away_col)
+        self.strategy = Strategy(parameters, bet_recommendation_function, bet_performance_function, odds_home_col, odds_away_col, bet_home_col, bet_away_col)
+        self.prediction_col = prediction_col
+        self.prob_home_col = prob_home_col
+        self.prob_away_col = prob_away_col
+        self.odds_home_col = odds_home_col
+        self.odds_away_col = odds_away_col
+        self.bet_home_col = bet_home_col
+        self.bet_away_col = bet_away_col
+
+    def train_model(self):
+        self.modeler.train_model()
+
+    def predict_and_assign_home_away_probabilities(self, test_data):
+        test_data[self.prediction_col] = self.modeler.predict(test_data)
+        test_data = self.modeler.assign_home_away_probabilities(test_data)
+        return(test_data)
+
+    def recommend_bets(self, test_data, **kwargs):
+        return(self.strategy.recommend_bets(test_data, **kwargs))
+
+    def calc_performance(self, test_data, type='both', **kwargs):
+        perf = {}
+        if type in set(['both', 'bet']):
+            perf['bet'] = strategy.calc_performance(test_data, **kwargs)
+        elif type in set(['both', 'model']):
+            perf['model'] = modeler.calc_performance(test_data, **kwargs)
+        else:
+            raise ValueError('Argument "type" must be one of ["bet", "model", "both"]')
+        return(perf)
 
 ##################
 # read in data
@@ -298,18 +383,19 @@ predictors = [
 ,'TEAM_FEATURE_STL_per_min_ewma_COURT_AWAY'
 ,'TEAM_FEATURE_STL_per_min_ewma_COURT_HOME'
 ,'TEAM_FEATURE_OREB_per_min_ewma_COURT_AWAY'
-,'TEAM_FEATURE_OREB_per_min_ewma_COURT_HOME'
+,'TEAM_FEATURE_OREB_per_min_ewma_COURT_HOME',
+'TEAM_FEATURE_PTS_TOTAL_cumulative_sum_AWAY', 'TEAM_FEATURE_PTS_TOTAL_per_min_ewma_AWAY', 'TEAM_FEATURE_PTS_TOTAL_per_min_expanding_mean_COURT_AWAY', 'TEAM_FEATURE_cumulative_pt_pct_COURT_HOME', 'TEAM_FEATURE_PTS_TOTAL_cumulative_sum_HOME', 'TEAM_FEATURE_PTS_TOTAL_per_min_ewma_COURT_HOME', 'TEAM_FEATURE_PTS_TOTAL_per_min_expanding_mean_AWAY', 'TEAM_FEATURE_PTS_TOTAL_per_min_ewma_COURT_AWAY', 'TEAM_FEATURE_PTS_TOTAL_cumulative_sum_COURT_HOME', 'TEAM_FEATURE_PTS_TOTAL_per_min_expanding_mean_COURT_HOME', 'TEAM_FEATURE_PTS_TOTAL_per_min_ewma_HOME', 'TEAM_FEATURE_PTS_TOTAL_per_min_expanding_mean_HOME', 'TEAM_FEATURE_cumulative_pt_pct_COURT_AWAY', 'TEAM_FEATURE_PTS_TOTAL_cumulative_sum_COURT_AWAY'
 ]
 
 
 model_param_dict = {
     'learning_rate':[0.05],
-    'n_estimators':[25],
+    'n_estimators':[5],
     'max_depth':[5, 7],
     'min_child_weight':[1],
     'gamma':[0.5],
     'subsample':[0.8],
-    'colsample_bytree':[1.0, 0.8],
+    'colsample_bytree':[1.0],
     'objective':['binary:logistic'],
     'nthread':[1],
     'scale_pos_weight':[1],
@@ -362,7 +448,6 @@ max_date_train = '2016-04-13'
 min_date_test = '2016-10-25'
 max_date_test = '2017-04-12'
 
-
 train_dat = train_data_init[(train_data_init['GAME_DATE'] >= min_date_train) & (train_data_init['GAME_DATE'] <= max_date_train)]
 
 test_dat = train_data_init[(train_data_init['GAME_DATE'] >= min_date_test) & (train_data_init['GAME_DATE'] <= max_date_test)]
@@ -374,8 +459,25 @@ return_model_object = True
 train_fn = train_xgb_classifier
 pred_fn = predict_with_xgb_classifier
 
+modeler = Modeler(parameters=model_params, training_data=train_dat, training_function=train_xgb_classifier, prediction_function=predict_with_xgb_classifier, performance_function=calc_model_performance, predictors=predictors, target=target)
+
+modeler.train_model()
+
+recommender = Recommender( parameters=model_params, training_data=train_dat, training_function=train_xgb_classifier,  prediction_function=predict_with_xgb_classifier, model_performance_function=calc_model_performance, predictors=predictors, target=target, bet_recommendation_function=None, bet_performance_function=None)
 
 
-results = train_test_model(train_dat=train_dat, test_dat=test_dat, train_fn=train_xgb_classifier, pred_fn=predict_with_xgb_classifier, predictors=predictors)
+recommender.train_model()
 
-plot_xgb_feat_importance(mod, predictors, 'gain', 'blue', 30)
+test_dat = modeler.assign_home_away_probabilities(test_dat)
+
+test_dat = recommender.predict_and_assign_home_away_probabilities(test_dat)
+
+
+
+results = train_test_model(train_dat=train_dat, test_dat=test_dat, train_fn=train_xgb_classifier, pred_fn=assign_home_away_prob_with_xgb_classifier, predictors=predictors)
+
+
+print(results['performance'])
+mod = results['model_object']
+
+plot_xgb_feat_importance(mod.base_estimator, predictors, 'gain', 'blue', 30)
