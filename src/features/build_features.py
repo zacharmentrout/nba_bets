@@ -111,14 +111,7 @@ team_data = pd.read_csv(team_data_file, sep='|', dtype= get_dtypes_dict(team_dat
 
 odds_data = pd.read_csv(odds_file, sep='|', dtype= get_dtypes_dict(odds_dtypes_file))
 
-odds_cols = ['odds', 'odds_dec', 'implied_prob', 'adj_implied_prob']
-odds_cols_home = [x+'_home' for x in odds_cols]
-odds_cols_away = [x+'_away' for x in odds_cols]
 
-# team_data = team_data.merge(odds_data[odds_cols_home + odds_cols_away + ['GAME_DATE', 'TEAM_NUMBER_HOME', 'TEAM_NUMBER_AWAY']], how='left', on=['GAME_DATE', 'TEAM_NUMBER_HOME', 'TEAM_NUMBER_AWAY'])
-
-# team_data.to_csv(processed_dir / 'test_odds_merge.csv', sep=',', index=False)
-# odds_data.to_csv(processed_dir / 'test_odds.csv', sep=',', index=False)
 
 team_data.sort_values(by=['TEAM_NUMBER',  'GAME_DATE'], inplace=True)
 
@@ -293,6 +286,34 @@ dim_game = pd.read_csv(dim_dir / 'dim_game.csv', sep='|', dtype=dim_game_dtypes)
 
 train_data = dim_game.merge(team_data_pivot, how='left', on='GAME_NUMBER')
 
+# add odds data
+odds_cols = ['odds', 'odds_dec', 'implied_prob', 'adj_implied_prob']
+odds_cols_home = [x+'_home' for x in odds_cols]
+odds_cols_away = [x+'_away' for x in odds_cols]
+
+train_data = train_data.merge(odds_data[odds_cols_home + odds_cols_away + ['GAME_DATE', 'TEAM_NUMBER_HOME', 'TEAM_NUMBER_AWAY']], how='left', on=['GAME_DATE', 'TEAM_NUMBER_HOME', 'TEAM_NUMBER_AWAY'])
+
+
+train_data['GAME_DATE_date'] = [dt.datetime.strptime(s, '%Y-%m-%d').date()for s in train_data['GAME_DATE']]
+
+train_data['GAME_DATE_week_number'] = [s.isocalendar()[1] for s in train_data['GAME_DATE_date']]
+
+train_data['GAME_DATE_year'] = [s.isocalendar()[0] for s in train_data['GAME_DATE_date']]
+
+
+# limit to regular season
+train_data = train_data[train_data['SEASON_TYPE'] == 'Regular Season']
+
+train_data = train_data[[x1 >= 10 and x2 >= 10 for x1,x2 in zip(train_data['TEAM_FEATURE_cumulative_count_GAME_NUMBER_HOME'], train_data['TEAM_FEATURE_cumulative_count_GAME_NUMBER_AWAY'])]]
+
+train_data = train_data[train_data['GAME_DATE'] <= '2019-08-22']
+
+dim_season = pd.read_csv(dim_dir / 'dim_season.csv', sep='|')
+
+
+train_data = train_data.merge(dim_season, on='SEASON_NUMBER', how='left')
+
+odds_data.to_csv(processed_dir / 'test_odds.csv', sep=',', index=False)
 
 train_data.to_csv(raw_dir / 'features_check.csv',  sep=',', index=False)
 
