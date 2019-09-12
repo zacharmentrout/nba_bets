@@ -23,6 +23,8 @@ import random
 import multiprocessing as mp
 from numpy.random import seed
 from functools import reduce
+import scipy.optimize as sco
+
 
 import pickle
 
@@ -42,6 +44,8 @@ from sklearn.model_selection import cross_val_score
 from sklearn.metrics import mean_squared_error
 from sklearn.metrics import r2_score
 from math import sqrt
+
+import quadprog
 
 
 ##################
@@ -66,8 +70,14 @@ def calc_model_performance(df, col_name_pred='pred', col_name_obs='WIN_HOME', ty
     if type == 'classification':
         df[col_name_pred + '_01'] = (df[col_name_pred] >= 0.5) * 1
         out = pd.DataFrame()
-        out['auc'] = [metrics.roc_auc_score(df[col_name_obs],df[col_name_pred])]
-        out['logloss'] = [metrics.log_loss(df[col_name_obs],df[col_name_pred])]
+        if df.shape[0] > 5:
+            out['auc'] = [metrics.roc_auc_score(df[col_name_obs],df[col_name_pred])]
+            out['logloss'] = [metrics.log_loss(df[col_name_obs],df[col_name_pred])]
+
+        else:
+            out['auc'] = -1
+            out['logloss'] = -1
+
         out['accuracy'] = [accuracy(df[col_name_pred + '_01'],df[col_name_obs])]
     else:
         raise ValueError('incorrect type')
@@ -203,13 +213,13 @@ def calc_total_profit(test_data, **kwargs):
 
 
 def indicate(x):
-    res = [0 if z < 0 else z for z in x]
+    res = [1 if z > 0 else 0 for z in x]
     return(res)
 
 
 def calc_bet_distribution(test_data, **kwargs):
-    test_data['prob_minus_1_over_odds_HOME'] = indicate(test_data['prob_WIN_HOME'] - 1/test_data['odds_dec_home'])
-    test_data['prob_minus_1_over_odds_AWAY'] = indicate((1 - test_data['prob_WIN_HOME']) - 1/test_data['odds_dec_away'])
+    test_data['positive_expectation_HOME'] = indicate(test_data['prob_WIN_HOME'] - 1/test_data['odds_dec_home'])
+    test_data['positive_expectation_AWAY'] = indicate((1 - test_data['prob_WIN_HOME']) - 1/test_data['odds_dec_away'])
 
     if 'bet_dist_type' in kwargs.keys():
         bet_dist_type = kwargs['bet_dist_type']
@@ -221,6 +231,39 @@ def calc_bet_distribution(test_data, **kwargs):
     else:
         bet_budget = 1
 
+    if bet_dist_type == 'opt':
+        max_sharpe_ratio(test_data)
+        test_data['bet_home'] = test_data['bet_budget_pct_home'] * bet_budget
+        test_data['bet_away'] = test_data['bet_budget_pct_away'] * bet_budget
+        test_data['place_bet_home'] = (test_data['bet_home'] > 0.001)*1
+        test_data['place_bet_away'] = (test_data['bet_away'] > 0.001)*1
+        test_data['place_bet'] = test_data['place_bet_home'] + test_data['place_bet_away']
+        return(test_data)
+
+
+    if bet_dist_type == 'max-ep':
+        test_data['calc_exp_profit_home'] = test_data['prob_WIN_HOME'] * test_data['odds_home'] - 1
+        test_data['calc_exp_profit_away'] = (1 - test_data['prob_WIN_HOME']) * test_data['odds_away'] - 1
+        max_ep_home = np.max(test_data['calc_exp_profit_home'])
+        max_ep_away = np.max(test_data['calc_exp_profit_away'])
+
+        test_data['bet_budget_pct_home'] = 0
+        test_data['bet_budget_pct_away'] = 0
+
+        if max_ep_home >= max_ep_away:
+            max_ep_ind = list(test_data['calc_exp_profit_home']).index(max_ep_home)
+            test_data.loc[max_ep_ind,'bet_budget_pct_home'] = 1
+        else:
+            max_ep_ind = list(test_data['calc_exp_profit_away']).index(max_ep_away)
+            test_data.loc[max_ep_ind,'bet_budget_pct_away'] = 1
+        test_data['bet_home'] = test_data['bet_budget_pct_home'] * bet_budget
+        test_data['bet_away'] = test_data['bet_budget_pct_away'] * bet_budget
+        test_data['place_bet_home'] = (test_data['bet_home'] > 0.001)*1
+        test_data['place_bet_away'] = (test_data['bet_away'] > 0.001)*1
+        test_data['place_bet'] = test_data['place_bet_home'] + test_data['place_bet_away']
+        return(test_data)
+
+
     if bet_dist_type == 'unif':
         test_data['Bi_home'] = 1
         test_data['Bi_away'] = 1
@@ -228,16 +271,16 @@ def calc_bet_distribution(test_data, **kwargs):
         test_data['Bi_home'] = test_data['prob_WIN_HOME']
         test_data['Bi_away'] = 1 - test_data['prob_WIN_HOME']
     elif bet_dist_type == 'abs-disc':
-        test_data['Bi_home'] = test_data['prob_minus_1_over_odds_HOME']
-        test_data['Bi_away'] = test_data['prob_minus_1_over_odds_AWAY']
+        test_data['Bi_home'] = test_data['positive_expectation_HOME']
+        test_data['Bi_away'] = test_data['positive_expectation_AWAY']
     elif bet_dist_type == 'rel-disc':
-        test_data['Bi_home'] = test_data['prob_minus_1_over_odds_HOME'] / test_data['prob_WIN_HOME']
-        test_data['Bi_away'] = test_data['prob_minus_1_over_odds_AWAY'] / (1 - test_data['prob_WIN_HOME'])
+        test_data['Bi_home'] = test_data['positive_expectation_HOME'] / test_data['prob_WIN_HOME']
+        test_data['Bi_away'] = test_data['positive_expectation_AWAY'] / (1 - test_data['prob_WIN_HOME'])
     else:
         raise ValueError('Invalid bet_dist_type')
 
-    test_data['numer_i_home'] = test_data['Bi_home'] * test_data['prob_minus_1_over_odds_HOME']
-    test_data['numer_i_away'] = test_data['Bi_away'] * test_data['prob_minus_1_over_odds_AWAY']
+    test_data['numer_i_home'] = test_data['Bi_home'] * test_data['positive_expectation_HOME']
+    test_data['numer_i_away'] = test_data['Bi_away'] * test_data['positive_expectation_AWAY']
     denom = (test_data['numer_i_home'] + test_data['numer_i_away']).sum()
     test_data['bet_budget_pct_home'] = test_data['numer_i_home'] / denom
     test_data['bet_budget_pct_away'] = test_data['numer_i_away'] / denom
@@ -332,19 +375,76 @@ class Recommender:
             perf['model'] = self.modeler.calc_performance(test_data)
         return(perf)
 
-    def calc_expected_profit(self, test_data):
-        test_data['exp_profit_home'] = (test_data[self.prob_home_col] * test_data[self.odds_home_col] - 1) * test_data[self.bet_home_col]
-        test_data['exp_profit_away'] = (test_data[self.prob_away_col] * test_data[self.odds_away_col] - 1) * test_data[self.bet_away_col]
-        test_data['exp_profit'] = test_data['exp_profit_home'] + test_data['exp_profit_away']
-        return(test_data)
 
-    def expected_cumulative_profit(self, test_data):
-        test_data = self.calc_expected_profit(test_data)
-        return(test_data['exp_profit'].sum())
+def calc_expected_profit(test_data):
+    test_data['exp_profit_home'] = (test_data['prob_WIN_HOME'] * test_data['odds_dec_home'] - 1) * test_data['bet_home']
+    test_data['exp_profit_away'] = (test_data['prob_WIN_AWAY'] * test_data['odds_dec_away'] - 1) * test_data['bet_away']
+    test_data['exp_profit'] = test_data['exp_profit_home'] + test_data['exp_profit_away']
+    return(test_data)
 
-    def variance_cumulative_profit(self, test_data):
-        pass
+def expected_cumulative_profit2(b, p, o):
+    result = sum((p * o - 1) * b)
+    return(result)
 
+def expected_cumulative_profit(test_data):
+    test_data = calc_expected_profit(test_data)
+    return(test_data['exp_profit'].sum())
+
+def variance_cumulative_profit(test_data):
+    sum1 = ((1 - test_data['prob_WIN_HOME']) * test_data['prob_WIN_HOME'] * pow(test_data['bet_home'], 2) * pow(test_data['odds_dec_home'], 2)).sum()
+    sum2 = ((1 - test_data['prob_WIN_AWAY']) * test_data['prob_WIN_AWAY'] * pow(test_data['bet_away'], 2) * pow(test_data['odds_dec_away'], 2)).sum()
+    return(sum1+sum2)
+
+def variance_cumulative_profit2(b, p, o):
+    result = sum((1 - p) * p * pow(b, 2) * pow(o, 2))
+    return(result)
+
+def sd_cumulative_profit2(b, p, o):
+    return(sqrt(variance_cumulative_profit2(b,p,o)))
+
+def sharpe_ratio(b,p,o):
+    result = expected_cumulative_profit(test_data) / sqrt(variance_cumulative_profit(test_data))
+    return(result)
+
+def sharpe_ratio2(b, p, o):
+    result = expected_cumulative_profit2(b, p, o) / sd_cumulative_profit2(b, p, o)
+    return(result)
+
+def negative_sharpe_ratio(test_data):
+    return -1 * sharpe_ratio(test_data)
+
+
+def negative_sharpe_ratio2(b, p, o):
+    return -1 * sharpe_ratio2(b, p, o)
+
+def max_sharpe_ratio2(p, o):
+    if len(p) != len(o):
+        raise ValueError('Arguments not the same length')
+    num_assets = len(p)
+    args = (p, o)
+    constraints = ({'type': 'eq', 'fun': lambda x: np.sum(x) - 1})
+    bound = (0.0,1.0)
+    bounds = tuple(bound for asset in range(num_assets))
+    result = sco.minimize(negative_sharpe_ratio2, num_assets*[1./num_assets,], args=args,
+                        method='SLSQP', bounds=bounds, constraints=constraints)
+
+    best_bets = result['x']
+    return best_bets
+
+def max_sharpe_ratio(test_data):
+    dat_copy = test_data.copy()
+    valid_rows = dat_copy.index[[False if x else True for x in dat_copy['odds_dec_home'].isna()]].tolist()
+
+    dat_copy = dat_copy.loc[valid_rows]
+
+    p = dat_copy['prob_WIN_HOME'].append(dat_copy['prob_WIN_AWAY'])
+    o = dat_copy['odds_dec_home'].append(dat_copy['odds_dec_away'])
+    b = max_sharpe_ratio2(p, o)
+    b_home = b[range(int(len(b)/2))]
+    b_away = b[range(int(len(b)/2), len(b))]
+    test_data.loc[valid_rows, 'bet_budget_pct_home'] = b_home
+    test_data.loc[valid_rows, 'bet_budget_pct_away'] = b_away
+    return(test_data)
 
 
 
@@ -504,7 +604,7 @@ predictors = [
 model_param_dict = {
     'learning_rate':[0.05],
     'n_estimators':[25],
-    'max_depth':[5, 7],
+    'max_depth':[5],
     'min_child_weight':[1],
     'gamma':[0.5],
     'subsample':[0.8],
@@ -514,7 +614,7 @@ model_param_dict = {
     'scale_pos_weight':[1],
     'seed':[29],
     'train_frac':[0.8],
-    'bet_dist_type':['unif'],
+    'bet_dist_type':['opt'],
     'bet_budget':[100]
 }
 
@@ -552,36 +652,43 @@ train_data_init = pd.read_csv(processed_dir / 'training_data.csv', in_delim)
 modeling_round_var = ['SEASON_NUMBER']
 bet_round_var = ['GAME_DATE_year','GAME_DATE_week_number']
 
-
 rounds = train_data_init.groupby(modeling_round_var + bet_round_var).size().reset_index().drop(0, axis=1)
 
+start_ind = 204
+current_modeling_round = rounds.loc[start_ind,modeling_round_var][0]
+recommender = None
+cumulative_profit = 0
+cumulative_correct_bets = 0
+cumulative_bets = 0
+stop_ind = 227
 
-start_ind = 45
-j = start_ind
+for j in range(start_ind, stop_ind):
+    test_round = rounds.iloc[j:j+1,:].reset_index(drop=True)
 
-train_rounds = rounds.iloc[0:j,:]
-test_round = rounds.iloc[j:j+1,:]
+    if recommender is None or test_round.loc[0,modeling_round_var][0] != current_modeling_round:
+        train_rounds = rounds.iloc[0:j,:].reset_index(drop=True)
+        train_dat = train_data_init.merge(train_rounds, how='inner', on=modeling_round_var+bet_round_var).copy()
 
-train_dat = train_data_init.merge(train_rounds, how='inner', on=modeling_round_var+bet_round_var).copy()
+        recommender = Recommender(parameters=model_params, training_data=train_dat, training_function=train_xgb_classifier,  prediction_function=predict_with_xgb_classifier, model_performance_function=calc_model_performance, predictors=predictors, target=target, bet_recommendation_function=calc_bet_distribution, bet_performance_function=calc_total_profit)
+        recommender.train_model()
+        current_modeling_round = test_round.loc[0,modeling_round_var][0]
 
-test_dat = train_data_init.merge(test_round, how='inner', on=modeling_round_var+bet_round_var).copy()
-
-
-recommender = Recommender(parameters=model_params, training_data=train_dat, training_function=train_xgb_classifier,  prediction_function=predict_with_xgb_classifier, model_performance_function=calc_model_performance, predictors=predictors, target=target, bet_recommendation_function=calc_bet_distribution, bet_performance_function=calc_total_profit)
-
-
-recommender.train_model()
-
-recommender.predict_and_assign_home_away_probabilities(test_dat)
-recommender.recommend_bets(test_dat)
-recommender.calc_expected_profit(test_dat)
-results = recommender.calc_performance(test_dat, type='both')
+    test_dat = train_data_init.merge(test_round, how='inner', on=modeling_round_var+bet_round_var).copy()
+    recommender.predict_and_assign_home_away_probabilities(test_dat)
+    recommender.recommend_bets(test_dat)
+    calc_expected_profit(test_dat)
+    results = recommender.calc_performance(test_dat, type='both')
+    cumulative_profit = cumulative_profit + results['bet']['total_profit'][0]
+    cumulative_correct_bets = cumulative_correct_bets + results['bet']['total_correct_bets'][0]
+    cumulative_bets = cumulative_bets + results['bet']['total_bets_placed'][0]
+    print(cumulative_profit)
+    print(cumulative_correct_bets)
 
 
 mod = recommender.modeler.model_object
-
 plot_xgb_feat_importance(mod.base_estimator, predictors, 'gain', 'blue', 30)
 
 
-
+#to do - build loop for train/test
+# to do - add cumulative profit and results tracker
 

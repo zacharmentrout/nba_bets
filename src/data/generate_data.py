@@ -24,6 +24,8 @@ import math
 # from nba_api.stats.static import teams
 # from nba_api.stats.static import season
 from nba_api.stats.endpoints.leaguegamefinder import LeagueGameFinder
+from nba_api.stats.endpoints.leaguegamelog import LeagueGameLog
+
 from nba_api.stats.endpoints.boxscoreadvancedv2 import BoxScoreAdvancedV2
 from nba_api.stats.endpoints.boxscorescoringv2 import BoxScoreScoringV2
 from nba_api.stats.endpoints.boxscoretraditionalv2 import BoxScoreTraditionalV2
@@ -141,24 +143,30 @@ def get_boxscore_data(game_id, end_period=0, player_or_team='both',timeout=10, p
 
     return {'player': bs_results_players_df, 'team': bs_results_teams_df}
 
+def get_four_factors_data(game_id, end_period=0, player_or_team='both',timeout=10, proxy=None, row_ids_team=['GAME_ID', 'TEAM_ID'], row_ids_player=['GAME_ID', 'TEAM_ID', 'PLAYER_ID']):
+    bs_fou = BoxScoreFourFactorsV2(end_period=end_period,
+        game_id=game_id, timeout=timeout, proxy=proxy)
+
+    bs_results_players_df = None
+    bs_results_teams_df = None
+
+    if player_or_team == 'player' or player_or_team == 'both':
+        bs_results_players_df = get_boxscore_data_from_data_frames(bs_fou, 'player')
+    if player_or_team == 'team' or player_or_team == 'both':
+        bs_results_teams_df = get_boxscore_data_from_data_frames(bs_fou, 'team')
+
+    return {'player': bs_results_players_df, 'team': bs_results_teams_df}
+
+
 
 def get_boxscore_data_from_data_frames(stats_obj, player_or_team='player'):
     dfs = stats_obj.get_data_frames()
-
-    # if player_or_team == 'player':
-    #     stats_to_get = PLAYER_STATS_TO_GET[type(stats_obj)]
-    #     row_ids = ROW_IDS_PLAYER
-    # elif player_or_team == 'team':
-    #     stats_to_get = TEAM_STATS_TO_GET[type(stats_obj)]
-    #     row_ids = ROW_IDS_TEAM
-    # else:
-    #     raise ValueError('player_or_team argument must be one of {"player", "team"}')
-
-    # stats_list = [transform_stats_df(dfs[x][stats_to_get[x]], x, type(stats_obj)) for x in list(stats_to_get.keys())]
-
-    stats_list = dfs
-
-    stats_df = reduce(lambda x, y: pd.merge(x, y, on = ['GAME_ID', 'TEAM_ID']), stats_list)
+    if player_or_team == 'player':
+        stats_df = dfs[0]
+    elif player_or_team == 'team':
+        stats_df = dfs[1]
+    else:
+        raise ValueError('player_or_team argument must be one of {player, team}')
 
     return stats_df
 
@@ -265,11 +273,13 @@ def process_raw_team_game_data(raw_data_file, dtype_file, out_dir, out_file_name
 
     processed_data = processed_data.merge(dim_game[['GAME_ID', 'GAME_NUMBER']], how='left', on='GAME_ID')
 
+
     processed_data.to_csv(out_dir / out_file_name, sep='|', index=False)
 
     dtypes = pd.DataFrame({'col_name':processed_data.columns, 'type':processed_data.dtypes})
 
     dtypes.to_csv(out_dir / (left(out_file_name, len(out_file_name)-4) + '_dtypes.csv'), sep='|')
+
 
     return(processed_data)
 
@@ -521,6 +531,10 @@ def pull_raw_team_game_data(seasons, out_dir, out_file_name, get_upcoming_games=
     home_away_final = pd.DataFrame([[s1, s2] if s1 is not None and s2 is not None else [s3, s4] for s1, s2, s3, s4 in zip(matchup_splits['TEAM_ABBREVIATION_AWAY1'], matchup_splits['TEAM_ABBREVIATION_HOME1'], matchup_splits['TEAM_ABBREVIATION_AWAY2'], matchup_splits['TEAM_ABBREVIATION_HOME2'])], columns=['TEAM_ABBREVIATION_AWAY', 'TEAM_ABBREVIATION_HOME'])
 
     team_data_basic = pd.concat([team_data_basic.reset_index(drop=True), home_away_final], axis=1)
+
+    # ff_data = [get_four_factors_data(x, player_or_team='team')['team'] for x in processed_data['GAME_ID'].unique()]
+
+    # ff_data_df = pd.concat(ff_data)
 
 
     ##################################
