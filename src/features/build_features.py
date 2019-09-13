@@ -90,6 +90,10 @@ def get_dtypes_dict(dtype_file, col_name_col_name='col_name', dtype_col_name='ty
     dtypes_dict = dict(zip(dtypes_get[col_name_col_name], dtypes_get[dtype_col_name]))
     return(dtypes_dict)
 
+def pythagorean_exp(stat1, stat2, num_games):
+    result = np.power(stat1,num_games) / (np.power(stat1,num_games) + np.power(stat2,num_games))
+    return(result)
+
 
 # location of data directory
 data_location = '/Users/zach/Documents/git/nba_bets/data'

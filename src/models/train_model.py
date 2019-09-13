@@ -603,7 +603,7 @@ predictors = [
 
 model_param_dict = {
     'learning_rate':[0.05],
-    'n_estimators':[25],
+    'n_estimators':[10],
     'max_depth':[5],
     'min_child_weight':[1],
     'gamma':[0.5],
@@ -613,7 +613,7 @@ model_param_dict = {
     'nthread':[1],
     'scale_pos_weight':[1],
     'seed':[29],
-    'train_frac':[0.8],
+    'train_frac':[0.7],
     'bet_dist_type':['opt'],
     'bet_budget':[100]
 }
@@ -654,13 +654,13 @@ bet_round_var = ['GAME_DATE_year','GAME_DATE_week_number']
 
 rounds = train_data_init.groupby(modeling_round_var + bet_round_var).size().reset_index().drop(0, axis=1)
 
-start_ind = 204
+start_ind = 45
 current_modeling_round = rounds.loc[start_ind,modeling_round_var][0]
 recommender = None
 cumulative_profit = 0
 cumulative_correct_bets = 0
 cumulative_bets = 0
-stop_ind = 227
+stop_ind = 67
 
 for j in range(start_ind, stop_ind):
     test_round = rounds.iloc[j:j+1,:].reset_index(drop=True)
@@ -689,6 +689,6 @@ mod = recommender.modeler.model_object
 plot_xgb_feat_importance(mod.base_estimator, predictors, 'gain', 'blue', 30)
 
 
-#to do - build loop for train/test
+# to do - build loop for train/test
 # to do - add cumulative profit and results tracker
 

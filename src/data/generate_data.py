@@ -115,7 +115,7 @@ def get_proxies():
     return(proxies_list)
 
 
-def get_boxscore_data(game_id, end_period=0, player_or_team='both',timeout=10, proxy=None):
+def get_boxscore_data2(game_id, end_period=0, player_or_team='team',timeout=10, proxy=None):
     bs_adv = BoxScoreAdvancedV2(end_period=end_period,
         game_id=game_id, timeout=timeout, proxy=proxy)
     bs_sco = BoxScoreScoringV2(end_period=end_period,
@@ -143,23 +143,29 @@ def get_boxscore_data(game_id, end_period=0, player_or_team='both',timeout=10, p
 
     return {'player': bs_results_players_df, 'team': bs_results_teams_df}
 
-def get_four_factors_data(game_id, end_period=0, player_or_team='both',timeout=10, proxy=None, row_ids_team=['GAME_ID', 'TEAM_ID'], row_ids_player=['GAME_ID', 'TEAM_ID', 'PLAYER_ID']):
-    bs_fou = BoxScoreFourFactorsV2(end_period=end_period,
+def get_boxscore_data(game_id, category='four_factors', end_period=0, player_or_team='team',timeout=10, proxy=None):
+
+    if category == 'four_factors':
+        bs = BoxScoreFourFactorsV2(end_period=end_period, game_id=game_id, timeout=timeout, proxy=proxy)
+    elif category == 'advanced':
+        bs = BoxScoreAdvancedV2(end_period=end_period,
         game_id=game_id, timeout=timeout, proxy=proxy)
+    else:
+        raise ValueError('incorrect category argument')
 
     bs_results_players_df = None
     bs_results_teams_df = None
 
     if player_or_team == 'player' or player_or_team == 'both':
-        bs_results_players_df = get_boxscore_data_from_data_frames(bs_fou, 'player')
+        bs_results_players_df = get_boxscore_data_from_data_frames(bs, 'player')
     if player_or_team == 'team' or player_or_team == 'both':
-        bs_results_teams_df = get_boxscore_data_from_data_frames(bs_fou, 'team')
+        bs_results_teams_df = get_boxscore_data_from_data_frames(bs, 'team')
 
     return {'player': bs_results_players_df, 'team': bs_results_teams_df}
 
 
 
-def get_boxscore_data_from_data_frames(stats_obj, player_or_team='player'):
+def get_boxscore_data_from_data_frames(stats_obj, player_or_team='team'):
     dfs = stats_obj.get_data_frames()
     if player_or_team == 'player':
         stats_df = dfs[0]
@@ -532,7 +538,18 @@ def pull_raw_team_game_data(seasons, out_dir, out_file_name, get_upcoming_games=
 
     team_data_basic = pd.concat([team_data_basic.reset_index(drop=True), home_away_final], axis=1)
 
-    # ff_data = [get_four_factors_data(x, player_or_team='team')['team'] for x in processed_data['GAME_ID'].unique()]
+#     ff_data = []
+# for x in team_data_basic['GAME_ID'].unique():
+#     got_results = False
+#     while not got_results:
+#         try:
+#             ff_res = get_four_factors_data(x, player_or_team='team')['team']
+#             got_results=True
+#             ff_data.append(ff_res)
+#             print('got results '+str(x))
+#         except:
+#             print('exception')
+
 
     # ff_data_df = pd.concat(ff_data)
 
@@ -669,4 +686,45 @@ processed_data = pd.read_csv(processed_dir / 'team_game_data_processed.csv', sep
 
 processed_odds = process_oddsportal_scrape_output(odds_json_file, dim_dir / 'dim_team.csv', dim_dir / 'dim_team_dtypes.csv', out_dir=processed_dir, out_file_name='processed_odds.csv')
 
+
+
+def try_get_boxscore_data(x, category, player_or_team='team', max_try=10):
+    num_tries = 1
+    got_results = False
+    while not got_results:
+        try:
+            res = get_boxscore_data(x, category=category, player_or_team=player_or_team)[player_or_team]
+            got_results = True
+            return(res)
+        except:
+            if num_tries == max_try:
+                raise ValueError('DAMN IT')
+            num_tries = num_tries+1
+            print('exception at game_id '+str(x))
+
+
+def get_boxscore_data_list(game_ids, category='four_factors', end_period=0, player_or_team='team',timeout=10, proxy=None):
+    results = [try_get_boxscore_data(x, category=category, player_or_team=player_or_team) for x in game_ids]
+    return(results)
+
+adv_data = get_boxscore_data_list(game_ids, category='advanced')
+ff_data = get_boxscore_data_list(game_ids, category='four_factors')
+
+adv_data_df = pd.concat(adv_data)
+ff_data_df = pd.concat(ff_data)
+
+dtypes_adv_data = pd.DataFrame({'col_name':adv_data_df.columns, 'type':adv_data_df.dtypes})
+dtypes_ff_data = pd.DataFrame({'col_name':ff_data_df.columns, 'type':ff_data_df.dtypes})
+
+
+
+adv_data_df.to_csv(raw_dir / 'boxscore_data_advanced_raw.csv', sep='|')
+dtypes_adv_data.to_csv(raw_dir / 'dtypes_boxscore_data_advanced_raw.csv', sep='|')
+
+ff_data_df.to_csv(raw_dir / 'boxscore_data_four_factors_raw.csv', sep='|')
+dtypes_ff_data.to_csv(raw_dir / 'dtypes_boxscore_data_four_factors_raw.csv', sep='|')
+
+
+adv_data_df.to_csv(raw_dir / 'boxscore_data_advanced_raw_TEST.csv', sep=',')
+ff_data_df.to_csv(raw_dir / 'boxscore_data_four_factors_raw_TEST.csv', sep=',')
 
