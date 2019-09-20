@@ -51,6 +51,12 @@ import quadprog
 ##################
 # functions
 ##################
+
+# todo delete later
+def pythagorean_exp(stat1, stat2, num_games):
+    result = np.power(stat1,num_games) / (np.power(stat1,num_games) + np.power(stat2,num_games))
+    return(result)
+
 def accuracy(pred, obs):
     if len(pred) != len(obs):
         raise ValueError('Predictions and observations different lengths')
@@ -458,141 +464,199 @@ in_delim = '|'
 target = 'WIN_HOME'
 
 predictors = [
-'TEAM_FEATURE_cumulative_win_pct_COURT_HOME'
-,'TEAM_FEATURE_cumulative_win_pct_COURT_AWAY'
-,'TEAM_FEATURE_cumulative_win_pct_HOME'
-,'TEAM_FEATURE_cumulative_win_pct_AWAY'
-,'TEAM_FEATURE_cumulative_count_GAME_NUMBER_AWAY'
-,'TEAM_FEATURE_cumulative_count_GAME_NUMBER_HOME'
-,'TEAM_FEATURE_TEAM_IS_HOME_TEAM_cumulative_sum_AWAY'
-,'TEAM_FEATURE_TEAM_IS_HOME_TEAM_cumulative_sum_HOME'
-,'TEAM_FEATURE_TEAM_IS_AWAY_TEAM_cumulative_sum_AWAY'
-,'TEAM_FEATURE_TEAM_IS_AWAY_TEAM_cumulative_sum_HOME'
-,'TEAM_FEATURE_MIN_cumulative_sum_AWAY'
-,'TEAM_FEATURE_MIN_cumulative_sum_HOME'
-,'TEAM_FEATURE_WIN_cumulative_sum_AWAY'
-,'TEAM_FEATURE_WIN_cumulative_sum_HOME'
-,'TEAM_FEATURE_LOSE_cumulative_sum_AWAY'
-,'TEAM_FEATURE_LOSE_cumulative_sum_HOME'
-,'TEAM_FEATURE_PTS_cumulative_sum_AWAY'
-,'TEAM_FEATURE_PTS_cumulative_sum_HOME'
-,'TEAM_FEATURE_PTS_per_min_expanding_mean_AWAY'
-,'TEAM_FEATURE_PTS_per_min_expanding_mean_HOME'
-,'TEAM_FEATURE_FTM_per_min_expanding_mean_AWAY'
-,'TEAM_FEATURE_FTM_per_min_expanding_mean_HOME'
-,'TEAM_FEATURE_BLK_per_min_expanding_mean_AWAY'
-,'TEAM_FEATURE_BLK_per_min_expanding_mean_HOME'
-,'TEAM_FEATURE_REB_per_min_expanding_mean_AWAY'
-,'TEAM_FEATURE_REB_per_min_expanding_mean_HOME'
-,'TEAM_FEATURE_DREB_per_min_expanding_mean_AWAY'
-,'TEAM_FEATURE_DREB_per_min_expanding_mean_HOME'
-,'TEAM_FEATURE_FG3A_per_min_expanding_mean_AWAY'
-,'TEAM_FEATURE_FG3A_per_min_expanding_mean_HOME'
-,'TEAM_FEATURE_FG3M_per_min_expanding_mean_AWAY'
-,'TEAM_FEATURE_FG3M_per_min_expanding_mean_HOME'
-,'TEAM_FEATURE_FGM_per_min_expanding_mean_AWAY'
-,'TEAM_FEATURE_FGM_per_min_expanding_mean_HOME'
-,'TEAM_FEATURE_PF_per_min_expanding_mean_AWAY'
-,'TEAM_FEATURE_PF_per_min_expanding_mean_HOME'
-,'TEAM_FEATURE_AST_per_min_expanding_mean_AWAY'
-,'TEAM_FEATURE_AST_per_min_expanding_mean_HOME'
-,'TEAM_FEATURE_FGA_per_min_expanding_mean_AWAY'
-,'TEAM_FEATURE_FGA_per_min_expanding_mean_HOME'
-,'TEAM_FEATURE_STL_per_min_expanding_mean_AWAY'
-,'TEAM_FEATURE_STL_per_min_expanding_mean_HOME'
-,'TEAM_FEATURE_OREB_per_min_expanding_mean_AWAY'
-,'TEAM_FEATURE_OREB_per_min_expanding_mean_HOME'
-,'TEAM_FEATURE_PTS_per_min_ewma_AWAY'
-,'TEAM_FEATURE_PTS_per_min_ewma_HOME'
-,'TEAM_FEATURE_FTM_per_min_ewma_AWAY'
-,'TEAM_FEATURE_FTM_per_min_ewma_HOME'
-,'TEAM_FEATURE_BLK_per_min_ewma_AWAY'
-,'TEAM_FEATURE_BLK_per_min_ewma_HOME'
-,'TEAM_FEATURE_REB_per_min_ewma_AWAY'
-,'TEAM_FEATURE_REB_per_min_ewma_HOME'
-,'TEAM_FEATURE_DREB_per_min_ewma_AWAY'
-,'TEAM_FEATURE_DREB_per_min_ewma_HOME'
-,'TEAM_FEATURE_FG3A_per_min_ewma_AWAY'
-,'TEAM_FEATURE_FG3A_per_min_ewma_HOME'
-,'TEAM_FEATURE_FG3M_per_min_ewma_AWAY'
-,'TEAM_FEATURE_FG3M_per_min_ewma_HOME'
-,'TEAM_FEATURE_FGM_per_min_ewma_AWAY'
-,'TEAM_FEATURE_FGM_per_min_ewma_HOME'
-,'TEAM_FEATURE_PF_per_min_ewma_AWAY'
-,'TEAM_FEATURE_PF_per_min_ewma_HOME'
-,'TEAM_FEATURE_AST_per_min_ewma_AWAY'
-,'TEAM_FEATURE_AST_per_min_ewma_HOME'
-,'TEAM_FEATURE_FGA_per_min_ewma_AWAY'
-,'TEAM_FEATURE_FGA_per_min_ewma_HOME'
-,'TEAM_FEATURE_STL_per_min_ewma_AWAY'
-,'TEAM_FEATURE_STL_per_min_ewma_HOME'
-,'TEAM_FEATURE_OREB_per_min_ewma_AWAY'
-,'TEAM_FEATURE_OREB_per_min_ewma_HOME'
-,'TEAM_FEATURE_TEAM_IS_HOME_TEAM_cumulative_sum_COURT_AWAY'
-,'TEAM_FEATURE_TEAM_IS_HOME_TEAM_cumulative_sum_COURT_HOME'
-,'TEAM_FEATURE_TEAM_IS_AWAY_TEAM_cumulative_sum_COURT_AWAY'
-,'TEAM_FEATURE_TEAM_IS_AWAY_TEAM_cumulative_sum_COURT_HOME'
-,'TEAM_FEATURE_MIN_cumulative_sum_COURT_AWAY'
-,'TEAM_FEATURE_MIN_cumulative_sum_COURT_HOME'
-,'TEAM_FEATURE_WIN_cumulative_sum_COURT_AWAY'
-,'TEAM_FEATURE_WIN_cumulative_sum_COURT_HOME'
-,'TEAM_FEATURE_LOSE_cumulative_sum_COURT_AWAY'
-,'TEAM_FEATURE_LOSE_cumulative_sum_COURT_HOME'
-,'TEAM_FEATURE_PTS_cumulative_sum_COURT_AWAY'
-,'TEAM_FEATURE_PTS_cumulative_sum_COURT_HOME'
-,'TEAM_FEATURE_PTS_per_min_expanding_mean_COURT_AWAY'
-,'TEAM_FEATURE_PTS_per_min_expanding_mean_COURT_HOME'
-,'TEAM_FEATURE_FTM_per_min_expanding_mean_COURT_AWAY'
-,'TEAM_FEATURE_FTM_per_min_expanding_mean_COURT_HOME'
-,'TEAM_FEATURE_BLK_per_min_expanding_mean_COURT_AWAY'
-,'TEAM_FEATURE_BLK_per_min_expanding_mean_COURT_HOME'
-,'TEAM_FEATURE_REB_per_min_expanding_mean_COURT_AWAY'
-,'TEAM_FEATURE_REB_per_min_expanding_mean_COURT_HOME'
-,'TEAM_FEATURE_DREB_per_min_expanding_mean_COURT_AWAY'
-,'TEAM_FEATURE_DREB_per_min_expanding_mean_COURT_HOME'
-,'TEAM_FEATURE_FG3A_per_min_expanding_mean_COURT_AWAY'
-,'TEAM_FEATURE_FG3A_per_min_expanding_mean_COURT_HOME'
-,'TEAM_FEATURE_FG3M_per_min_expanding_mean_COURT_AWAY'
-,'TEAM_FEATURE_FG3M_per_min_expanding_mean_COURT_HOME'
-,'TEAM_FEATURE_FGM_per_min_expanding_mean_COURT_AWAY'
-,'TEAM_FEATURE_FGM_per_min_expanding_mean_COURT_HOME'
-,'TEAM_FEATURE_PF_per_min_expanding_mean_COURT_AWAY'
-,'TEAM_FEATURE_PF_per_min_expanding_mean_COURT_HOME'
-,'TEAM_FEATURE_AST_per_min_expanding_mean_COURT_AWAY'
-,'TEAM_FEATURE_AST_per_min_expanding_mean_COURT_HOME'
-,'TEAM_FEATURE_FGA_per_min_expanding_mean_COURT_AWAY'
-,'TEAM_FEATURE_FGA_per_min_expanding_mean_COURT_HOME'
-,'TEAM_FEATURE_STL_per_min_expanding_mean_COURT_AWAY'
-,'TEAM_FEATURE_STL_per_min_expanding_mean_COURT_HOME'
-,'TEAM_FEATURE_OREB_per_min_expanding_mean_COURT_AWAY'
-,'TEAM_FEATURE_OREB_per_min_expanding_mean_COURT_HOME'
-,'TEAM_FEATURE_PTS_per_min_ewma_COURT_AWAY'
-,'TEAM_FEATURE_PTS_per_min_ewma_COURT_HOME'
-,'TEAM_FEATURE_FTM_per_min_ewma_COURT_AWAY'
-,'TEAM_FEATURE_FTM_per_min_ewma_COURT_HOME'
-,'TEAM_FEATURE_BLK_per_min_ewma_COURT_AWAY'
-,'TEAM_FEATURE_BLK_per_min_ewma_COURT_HOME'
-,'TEAM_FEATURE_REB_per_min_ewma_COURT_AWAY'
-,'TEAM_FEATURE_REB_per_min_ewma_COURT_HOME'
-,'TEAM_FEATURE_DREB_per_min_ewma_COURT_AWAY'
-,'TEAM_FEATURE_DREB_per_min_ewma_COURT_HOME'
-,'TEAM_FEATURE_FG3A_per_min_ewma_COURT_AWAY'
-,'TEAM_FEATURE_FG3A_per_min_ewma_COURT_HOME'
-,'TEAM_FEATURE_FG3M_per_min_ewma_COURT_AWAY'
-,'TEAM_FEATURE_FG3M_per_min_ewma_COURT_HOME'
-,'TEAM_FEATURE_FGM_per_min_ewma_COURT_AWAY'
-,'TEAM_FEATURE_FGM_per_min_ewma_COURT_HOME'
-,'TEAM_FEATURE_PF_per_min_ewma_COURT_AWAY'
-,'TEAM_FEATURE_PF_per_min_ewma_COURT_HOME'
-,'TEAM_FEATURE_AST_per_min_ewma_COURT_AWAY'
-,'TEAM_FEATURE_AST_per_min_ewma_COURT_HOME'
-,'TEAM_FEATURE_FGA_per_min_ewma_COURT_AWAY'
-,'TEAM_FEATURE_FGA_per_min_ewma_COURT_HOME'
-,'TEAM_FEATURE_STL_per_min_ewma_COURT_AWAY'
-,'TEAM_FEATURE_STL_per_min_ewma_COURT_HOME'
-,'TEAM_FEATURE_OREB_per_min_ewma_COURT_AWAY'
-,'TEAM_FEATURE_OREB_per_min_ewma_COURT_HOME',
-'TEAM_FEATURE_PTS_TOTAL_cumulative_sum_AWAY', 'TEAM_FEATURE_PTS_TOTAL_per_min_ewma_AWAY', 'TEAM_FEATURE_PTS_TOTAL_per_min_expanding_mean_COURT_AWAY', 'TEAM_FEATURE_cumulative_pt_pct_COURT_HOME', 'TEAM_FEATURE_PTS_TOTAL_cumulative_sum_HOME', 'TEAM_FEATURE_PTS_TOTAL_per_min_ewma_COURT_HOME', 'TEAM_FEATURE_PTS_TOTAL_per_min_expanding_mean_AWAY', 'TEAM_FEATURE_PTS_TOTAL_per_min_ewma_COURT_AWAY', 'TEAM_FEATURE_PTS_TOTAL_cumulative_sum_COURT_HOME', 'TEAM_FEATURE_PTS_TOTAL_per_min_expanding_mean_COURT_HOME', 'TEAM_FEATURE_PTS_TOTAL_per_min_ewma_HOME', 'TEAM_FEATURE_PTS_TOTAL_per_min_expanding_mean_HOME', 'TEAM_FEATURE_cumulative_pt_pct_COURT_AWAY', 'TEAM_FEATURE_PTS_TOTAL_cumulative_sum_COURT_AWAY',
+# 'TEAM_FEATURE_PF_per_min_expanding_mean_AWAY',
+# 'TEAM_FEATURE_PF_per_min_expanding_mean_HOME',
+# 'TEAM_FEATURE_FG3A_per_min_expanding_mean_AWAY',
+# 'TEAM_FEATURE_FG3A_per_min_expanding_mean_HOME',
+# 'TEAM_FEATURE_FGA_per_min_expanding_mean_AWAY',
+# 'TEAM_FEATURE_FGA_per_min_expanding_mean_HOME',
+# 'TEAM_FEATURE_DREB_per_min_expanding_mean_AWAY',
+# 'TEAM_FEATURE_DREB_per_min_expanding_mean_HOME',
+# 'TEAM_FEATURE_REB_per_min_expanding_mean_AWAY',
+# 'TEAM_FEATURE_REB_per_min_expanding_mean_HOME',
+# 'TEAM_FEATURE_BLK_per_min_expanding_mean_AWAY',
+# 'TEAM_FEATURE_BLK_per_min_expanding_mean_HOME',
+# 'TEAM_FEATURE_AST_per_min_expanding_mean_AWAY',
+# 'TEAM_FEATURE_AST_per_min_expanding_mean_HOME',
+# 'TEAM_FEATURE_OREB_per_min_expanding_mean_AWAY',
+# 'TEAM_FEATURE_OREB_per_min_expanding_mean_HOME',
+# 'TEAM_FEATURE_FG3M_per_min_expanding_mean_AWAY',
+# 'TEAM_FEATURE_FG3M_per_min_expanding_mean_HOME',
+# 'TEAM_FEATURE_STL_per_min_expanding_mean_AWAY',
+# 'TEAM_FEATURE_STL_per_min_expanding_mean_HOME',
+# 'TEAM_FEATURE_FGM_per_min_expanding_mean_AWAY',
+# 'TEAM_FEATURE_FGM_per_min_expanding_mean_HOME',
+# 'TEAM_FEATURE_PTS_per_min_expanding_mean_AWAY',
+# 'TEAM_FEATURE_PTS_per_min_expanding_mean_HOME',
+# 'TEAM_FEATURE_PTS_TOTAL_per_min_expanding_mean_AWAY',
+# 'TEAM_FEATURE_PTS_TOTAL_per_min_expanding_mean_HOME',
+# 'TEAM_FEATURE_FTM_per_min_expanding_mean_AWAY',
+# 'TEAM_FEATURE_FTM_per_min_expanding_mean_HOME',
+# 'TEAM_FEATURE_FG_PCT_expanding_mean_AWAY',
+# 'TEAM_FEATURE_FG_PCT_expanding_mean_HOME',
+# 'TEAM_FEATURE_FG3_PCT_expanding_mean_AWAY',
+# 'TEAM_FEATURE_FG3_PCT_expanding_mean_HOME',
+# 'TEAM_FEATURE_FT_PCT_expanding_mean_AWAY',
+# 'TEAM_FEATURE_FT_PCT_expanding_mean_HOME',
+# 'TEAM_FEATURE_OFF_RATING_expanding_mean_AWAY',
+# 'TEAM_FEATURE_OFF_RATING_expanding_mean_HOME',
+# 'TEAM_FEATURE_DEF_RATING_expanding_mean_AWAY',
+# 'TEAM_FEATURE_DEF_RATING_expanding_mean_HOME',
+# 'TEAM_FEATURE_EFG_PCT_expanding_mean_AWAY',
+# 'TEAM_FEATURE_EFG_PCT_expanding_mean_HOME',
+# 'TEAM_FEATURE_TM_TOV_PCT_expanding_mean_AWAY',
+# 'TEAM_FEATURE_TM_TOV_PCT_expanding_mean_HOME',
+# 'TEAM_FEATURE_PF_per_min_ewma_AWAY',
+# 'TEAM_FEATURE_PF_per_min_ewma_HOME',
+# 'TEAM_FEATURE_FG3A_per_min_ewma_AWAY',
+# 'TEAM_FEATURE_FG3A_per_min_ewma_HOME',
+# 'TEAM_FEATURE_FGA_per_min_ewma_AWAY',
+# 'TEAM_FEATURE_FGA_per_min_ewma_HOME',
+# 'TEAM_FEATURE_DREB_per_min_ewma_AWAY',
+# 'TEAM_FEATURE_DREB_per_min_ewma_HOME',
+# 'TEAM_FEATURE_REB_per_min_ewma_AWAY',
+# 'TEAM_FEATURE_REB_per_min_ewma_HOME',
+# 'TEAM_FEATURE_BLK_per_min_ewma_AWAY',
+# 'TEAM_FEATURE_BLK_per_min_ewma_HOME',
+# 'TEAM_FEATURE_AST_per_min_ewma_AWAY',
+# 'TEAM_FEATURE_AST_per_min_ewma_HOME',
+# 'TEAM_FEATURE_OREB_per_min_ewma_AWAY',
+# 'TEAM_FEATURE_OREB_per_min_ewma_HOME',
+# 'TEAM_FEATURE_FG3M_per_min_ewma_AWAY',
+# 'TEAM_FEATURE_FG3M_per_min_ewma_HOME',
+# 'TEAM_FEATURE_STL_per_min_ewma_AWAY',
+# 'TEAM_FEATURE_STL_per_min_ewma_HOME',
+# 'TEAM_FEATURE_FGM_per_min_ewma_AWAY',
+# 'TEAM_FEATURE_FGM_per_min_ewma_HOME',
+# 'TEAM_FEATURE_PTS_per_min_ewma_AWAY',
+# 'TEAM_FEATURE_PTS_per_min_ewma_HOME',
+# 'TEAM_FEATURE_PTS_TOTAL_per_min_ewma_AWAY',
+# 'TEAM_FEATURE_PTS_TOTAL_per_min_ewma_HOME',
+# 'TEAM_FEATURE_FTM_per_min_ewma_AWAY',
+# 'TEAM_FEATURE_FTM_per_min_ewma_HOME',
+# 'TEAM_FEATURE_FG_PCT_ewma_AWAY',
+# 'TEAM_FEATURE_FG_PCT_ewma_HOME',
+# 'TEAM_FEATURE_FG3_PCT_ewma_AWAY',
+# 'TEAM_FEATURE_FG3_PCT_ewma_HOME',
+# 'TEAM_FEATURE_FT_PCT_ewma_AWAY',
+# 'TEAM_FEATURE_FT_PCT_ewma_HOME',
+'TEAM_FEATURE_OFF_RATING_ewma_AWAY',
+'TEAM_FEATURE_OFF_RATING_ewma_HOME',
+'TEAM_FEATURE_DEF_RATING_ewma_AWAY',
+'TEAM_FEATURE_DEF_RATING_ewma_HOME',
+# 'TEAM_FEATURE_EFG_PCT_ewma_AWAY',
+# 'TEAM_FEATURE_EFG_PCT_ewma_HOME',
+# 'TEAM_FEATURE_TM_TOV_PCT_ewma_AWAY',
+# 'TEAM_FEATURE_TM_TOV_PCT_ewma_HOME',
+# 'TEAM_FEATURE_cumulative_win_pct_AWAY',
+# 'TEAM_FEATURE_cumulative_win_pct_HOME',
+# 'TEAM_FEATURE_EFG_PCT_cumulative_AWAY',
+# 'TEAM_FEATURE_EFG_PCT_cumulative_HOME',
+# 'TEAM_FEATURE_TM_TOV_PCT_cumulative_AWAY',
+# 'TEAM_FEATURE_TM_TOV_PCT_cumulative_HOME',
+'TEAM_FEATURE_OFF_RATING_ewma_pythag_AWAY',
+'TEAM_FEATURE_OFF_RATING_ewma_pythag_HOME',
+# 'TEAM_FEATURE_PF_per_min_expanding_mean_COURT_AWAY',
+# 'TEAM_FEATURE_PF_per_min_expanding_mean_COURT_HOME',
+# 'TEAM_FEATURE_FG3A_per_min_expanding_mean_COURT_AWAY',
+# 'TEAM_FEATURE_FG3A_per_min_expanding_mean_COURT_HOME',
+# 'TEAM_FEATURE_FGA_per_min_expanding_mean_COURT_AWAY',
+# 'TEAM_FEATURE_FGA_per_min_expanding_mean_COURT_HOME',
+# 'TEAM_FEATURE_DREB_per_min_expanding_mean_COURT_AWAY',
+# 'TEAM_FEATURE_DREB_per_min_expanding_mean_COURT_HOME',
+# 'TEAM_FEATURE_REB_per_min_expanding_mean_COURT_AWAY',
+# 'TEAM_FEATURE_REB_per_min_expanding_mean_COURT_HOME',
+# 'TEAM_FEATURE_BLK_per_min_expanding_mean_COURT_AWAY',
+# 'TEAM_FEATURE_BLK_per_min_expanding_mean_COURT_HOME',
+# 'TEAM_FEATURE_AST_per_min_expanding_mean_COURT_AWAY',
+# 'TEAM_FEATURE_AST_per_min_expanding_mean_COURT_HOME',
+# 'TEAM_FEATURE_OREB_per_min_expanding_mean_COURT_AWAY',
+# 'TEAM_FEATURE_OREB_per_min_expanding_mean_COURT_HOME',
+# 'TEAM_FEATURE_FG3M_per_min_expanding_mean_COURT_AWAY',
+# 'TEAM_FEATURE_FG3M_per_min_expanding_mean_COURT_HOME',
+# 'TEAM_FEATURE_STL_per_min_expanding_mean_COURT_AWAY',
+# 'TEAM_FEATURE_STL_per_min_expanding_mean_COURT_HOME',
+# 'TEAM_FEATURE_FGM_per_min_expanding_mean_COURT_AWAY',
+# 'TEAM_FEATURE_FGM_per_min_expanding_mean_COURT_HOME',
+# 'TEAM_FEATURE_PTS_per_min_expanding_mean_COURT_AWAY',
+# 'TEAM_FEATURE_PTS_per_min_expanding_mean_COURT_HOME',
+# 'TEAM_FEATURE_PTS_TOTAL_per_min_expanding_mean_COURT_AWAY',
+# 'TEAM_FEATURE_PTS_TOTAL_per_min_expanding_mean_COURT_HOME',
+# 'TEAM_FEATURE_FTM_per_min_expanding_mean_COURT_AWAY',
+# 'TEAM_FEATURE_FTM_per_min_expanding_mean_COURT_HOME',
+# 'TEAM_FEATURE_FG_PCT_expanding_mean_COURT_AWAY',
+# 'TEAM_FEATURE_FG_PCT_expanding_mean_COURT_HOME',
+# 'TEAM_FEATURE_FG3_PCT_expanding_mean_COURT_AWAY',
+# 'TEAM_FEATURE_FG3_PCT_expanding_mean_COURT_HOME',
+# 'TEAM_FEATURE_FT_PCT_expanding_mean_COURT_AWAY',
+# 'TEAM_FEATURE_FT_PCT_expanding_mean_COURT_HOME',
+# 'TEAM_FEATURE_OFF_RATING_expanding_mean_COURT_AWAY',
+# 'TEAM_FEATURE_OFF_RATING_expanding_mean_COURT_HOME',
+# 'TEAM_FEATURE_DEF_RATING_expanding_mean_COURT_AWAY',
+# 'TEAM_FEATURE_DEF_RATING_expanding_mean_COURT_HOME',
+# 'TEAM_FEATURE_EFG_PCT_expanding_mean_COURT_AWAY',
+# 'TEAM_FEATURE_EFG_PCT_expanding_mean_COURT_HOME',
+# 'TEAM_FEATURE_TM_TOV_PCT_expanding_mean_COURT_AWAY',
+# 'TEAM_FEATURE_TM_TOV_PCT_expanding_mean_COURT_HOME',
+# 'TEAM_FEATURE_PF_per_min_ewma_COURT_AWAY',
+# 'TEAM_FEATURE_PF_per_min_ewma_COURT_HOME',
+# 'TEAM_FEATURE_FG3A_per_min_ewma_COURT_AWAY',
+# 'TEAM_FEATURE_FG3A_per_min_ewma_COURT_HOME',
+# 'TEAM_FEATURE_FGA_per_min_ewma_COURT_AWAY',
+# 'TEAM_FEATURE_FGA_per_min_ewma_COURT_HOME',
+# 'TEAM_FEATURE_DREB_per_min_ewma_COURT_AWAY',
+# 'TEAM_FEATURE_DREB_per_min_ewma_COURT_HOME',
+# 'TEAM_FEATURE_REB_per_min_ewma_COURT_AWAY',
+# 'TEAM_FEATURE_REB_per_min_ewma_COURT_HOME',
+# 'TEAM_FEATURE_BLK_per_min_ewma_COURT_AWAY',
+# 'TEAM_FEATURE_BLK_per_min_ewma_COURT_HOME',
+# 'TEAM_FEATURE_AST_per_min_ewma_COURT_AWAY',
+# 'TEAM_FEATURE_AST_per_min_ewma_COURT_HOME',
+# 'TEAM_FEATURE_OREB_per_min_ewma_COURT_AWAY',
+# 'TEAM_FEATURE_OREB_per_min_ewma_COURT_HOME',
+# 'TEAM_FEATURE_FG3M_per_min_ewma_COURT_AWAY',
+# 'TEAM_FEATURE_FG3M_per_min_ewma_COURT_HOME',
+# 'TEAM_FEATURE_STL_per_min_ewma_COURT_AWAY',
+# 'TEAM_FEATURE_STL_per_min_ewma_COURT_HOME',
+# 'TEAM_FEATURE_FGM_per_min_ewma_COURT_AWAY',
+# 'TEAM_FEATURE_FGM_per_min_ewma_COURT_HOME',
+# 'TEAM_FEATURE_PTS_per_min_ewma_COURT_AWAY',
+# 'TEAM_FEATURE_PTS_per_min_ewma_COURT_HOME',
+# 'TEAM_FEATURE_PTS_TOTAL_per_min_ewma_COURT_AWAY',
+# 'TEAM_FEATURE_PTS_TOTAL_per_min_ewma_COURT_HOME',
+# 'TEAM_FEATURE_FTM_per_min_ewma_COURT_AWAY',
+# 'TEAM_FEATURE_FTM_per_min_ewma_COURT_HOME',
+# 'TEAM_FEATURE_FG_PCT_ewma_COURT_AWAY',
+# 'TEAM_FEATURE_FG_PCT_ewma_COURT_HOME',
+# 'TEAM_FEATURE_FG3_PCT_ewma_COURT_AWAY',
+# 'TEAM_FEATURE_FG3_PCT_ewma_COURT_HOME',
+# 'TEAM_FEATURE_FT_PCT_ewma_COURT_AWAY',
+# 'TEAM_FEATURE_FT_PCT_ewma_COURT_HOME',
+'TEAM_FEATURE_OFF_RATING_ewma_COURT_AWAY',
+'TEAM_FEATURE_OFF_RATING_ewma_COURT_HOME',
+'TEAM_FEATURE_DEF_RATING_ewma_COURT_AWAY',
+'TEAM_FEATURE_DEF_RATING_ewma_COURT_HOME',
+'TEAM_FEATURE_EFG_PCT_ewma_COURT_AWAY',
+'TEAM_FEATURE_EFG_PCT_ewma_COURT_HOME',
+'TEAM_FEATURE_TM_TOV_PCT_ewma_COURT_AWAY',
+'TEAM_FEATURE_TM_TOV_PCT_ewma_COURT_HOME',
+'TEAM_FEATURE_cumulative_win_pct_COURT_AWAY',
+'TEAM_FEATURE_cumulative_win_pct_COURT_HOME',
+'TEAM_FEATURE_cumulative_pt_pct_COURT_AWAY',
+'TEAM_FEATURE_cumulative_pt_pct_COURT_HOME',
+'TEAM_FEATURE_TM_TOV_PCT_cumulative_COURT_AWAY',
+'TEAM_FEATURE_TM_TOV_PCT_cumulative_COURT_HOME',
+'TEAM_FEATURE_EFG_PCT_cumulative_COURT_AWAY',
+'TEAM_FEATURE_EFG_PCT_cumulative_COURT_HOME',
+'TEAM_FEATURE_OFF_RATING_ewma_pythag_COURT_AWAY',
+'TEAM_FEATURE_OFF_RATING_ewma_pythag_COURT_HOME',
+
+'TEAM_FEATURE_OFF_RATING_ewma_pythag_HOME_adj',
+'TEAM_FEATURE_OFF_RATING_ewma_pythag_AWAY_adj',
+
+'TEAM_FEATURE_OFF_RATING_ewma_HOME_adj',
+'TEAM_FEATURE_OFF_RATING_ewma_AWAY_adj',
+
 'implied_prob_home',
 'implied_prob_away',
 'adj_implied_prob_home',
@@ -603,7 +667,7 @@ predictors = [
 
 model_param_dict = {
     'learning_rate':[0.05],
-    'n_estimators':[10],
+    'n_estimators':[25],
     'max_depth':[5],
     'min_child_weight':[1],
     'gamma':[0.5],
@@ -613,7 +677,7 @@ model_param_dict = {
     'nthread':[1],
     'scale_pos_weight':[1],
     'seed':[29],
-    'train_frac':[0.7],
+    'train_frac':[0.9],
     'bet_dist_type':['opt'],
     'bet_budget':[100]
 }
@@ -644,6 +708,15 @@ raw_dir = data_dir / 'raw'
 train_data_init = pd.read_csv(processed_dir / 'training_data.csv', in_delim)
 
 
+# add one or two more features (todo: add this to build_features.py)
+train_data_init['TEAM_FEATURE_OFF_RATING_ewma_HOME_adj'] = train_data_init['TEAM_FEATURE_OFF_RATING_ewma_HOME'] * train_data_init['TEAM_FEATURE_DEF_RATING_ewma_AWAY'] / 100
+train_data_init['TEAM_FEATURE_OFF_RATING_ewma_AWAY_adj'] = train_data_init['TEAM_FEATURE_OFF_RATING_ewma_AWAY'] * train_data_init['TEAM_FEATURE_DEF_RATING_ewma_HOME'] / 100
+
+train_data_init['TEAM_FEATURE_DEF_RATING_ewma_HOME_adj'] = train_data_init['TEAM_FEATURE_DEF_RATING_ewma_HOME'] * train_data_init['TEAM_FEATURE_OFF_RATING_ewma_AWAY'] / 100
+train_data_init['TEAM_FEATURE_DEF_RATING_ewma_AWAY_adj'] = train_data_init['TEAM_FEATURE_DEF_RATING_ewma_AWAY'] * train_data_init['TEAM_FEATURE_OFF_RATING_ewma_HOME'] / 100
+
+train_data_init['TEAM_FEATURE_OFF_RATING_ewma_pythag_HOME_adj'] = pythagorean_exp(train_data_init['TEAM_FEATURE_OFF_RATING_ewma_HOME_adj'], train_data_init['TEAM_FEATURE_DEF_RATING_ewma_HOME_adj'], train_data_init['TEAM_FEATURE_cumulative_count_GAME_NUMBER_HOME'])
+train_data_init['TEAM_FEATURE_OFF_RATING_ewma_pythag_AWAY_adj'] = pythagorean_exp(train_data_init['TEAM_FEATURE_OFF_RATING_ewma_AWAY_adj'], train_data_init['TEAM_FEATURE_DEF_RATING_ewma_AWAY_adj'], train_data_init['TEAM_FEATURE_cumulative_count_GAME_NUMBER_AWAY'])
 ##################
 # test model training
 ##################
@@ -660,7 +733,7 @@ recommender = None
 cumulative_profit = 0
 cumulative_correct_bets = 0
 cumulative_bets = 0
-stop_ind = 67
+stop_ind = 47
 
 for j in range(start_ind, stop_ind):
     test_round = rounds.iloc[j:j+1,:].reset_index(drop=True)

@@ -19,6 +19,8 @@ import math
 
 # To do
 # Fix get full game sched function to include team abbrev, team name but not home/away id, name abbrev
+# Add other boxscore "get" functions to pull raw team game data function
+# Add logging to help with debug
 
 # from nba_api.stats.static import players
 # from nba_api.stats.static import teams
@@ -219,6 +221,26 @@ def get_dtypes_dict(dtype_file, col_name_col_name='col_name', dtype_col_name='ty
     dtypes_dict = dict(zip(dtypes_get[col_name_col_name], dtypes_get[dtype_col_name]))
     return(dtypes_dict)
 
+def try_get_boxscore_data(x, category, player_or_team='team', max_try=10):
+    num_tries = 1
+    got_results = False
+    while not got_results:
+        try:
+            res = get_boxscore_data(x, category=category, player_or_team=player_or_team)[player_or_team]
+            got_results = True
+            return(res)
+        except:
+            if num_tries == max_try:
+                raise ValueError('DAMN IT')
+            num_tries = num_tries+1
+            print('exception at game_id '+str(x))
+
+
+def get_boxscore_data_list(game_ids, category='four_factors', end_period=0, player_or_team='team',timeout=10, proxy=None):
+    results = [try_get_boxscore_data(x, category=category, player_or_team=player_or_team) for x in game_ids]
+    return(results)
+
+
 
 def process_raw_team_game_data(raw_data_file, dtype_file, out_dir, out_file_name, dim_directory):
 
@@ -299,7 +321,7 @@ def generate_dim_tables(raw_data_file, dim_directory, dtype_file):
         min_GAME_DATE = ('GAME_DATE', 'min'),
         max_GAME_DATE = ('GAME_DATE', 'max'),
         nunique_GAME_ID = ('GAME_ID', 'nunique'),
-        ).sort_values('min_GAME_DATE').reset_index(drop=True)
+        ).sort_values('min_GAME_DATE').reset_index(drop=False)
 
     date_cols = ['min_GAME_DATE', 'max_GAME_DATE']
 
@@ -424,7 +446,7 @@ def generate_dim_tables(raw_data_file, dim_directory, dtype_file):
     ###########
     # matchups
     ###########
-    dim_matchup = team_game_data.groupby(['TEAM_NUMBER_HOME', 'TEAM_NUMBER_AWAY']).size().reset_index(drop=True).rename(columns={0:'count'}).drop('count',axis=1)
+    dim_matchup = team_game_data.groupby(['TEAM_NUMBER_HOME', 'TEAM_NUMBER_AWAY']).size().reset_index(drop=False).rename(columns={0:'count'}).drop('count',axis=1)
 
     pairings = pd.DataFrame([[s1, s2] if s1 < s2 else [s2, s1] for s1, s2 in zip(dim_matchup['TEAM_NUMBER_HOME'], dim_matchup['TEAM_NUMBER_AWAY'])], columns = ['TEAM_NUMBER_PAIRING1', 'TEAM_NUMBER_PAIRING2'])
 
@@ -437,7 +459,7 @@ def generate_dim_tables(raw_data_file, dim_directory, dtype_file):
 
 
     # pairing (no home/away distinction)
-    dim_pairing = dim_matchup.groupby(['TEAM_NUMBER_PAIRING1', 'TEAM_NUMBER_PAIRING2']).size().reset_index(drop=True).rename(columns={0:'count'}).drop('count',axis=1)
+    dim_pairing = dim_matchup.groupby(['TEAM_NUMBER_PAIRING1', 'TEAM_NUMBER_PAIRING2']).size().reset_index(drop=False).rename(columns={0:'count'}).drop('count',axis=1)
 
     dim_pairing['PAIRING_NUMBER'] = np.arange(len(dim_pairing))
 
@@ -468,7 +490,7 @@ def generate_dim_tables(raw_data_file, dim_directory, dtype_file):
     # convert game date col to date
     team_game_data['GAME_DATE'] = [dt.datetime.strptime(s, '%Y-%m-%d').date() for s in team_game_data['GAME_DATE']]
 
-    dim_game = team_game_data.groupby(['GAME_ID', 'SEASON_ID', 'GAME_DATE', 'PAIRING_NUMBER', 'MATCHUP_NUMBER', 'TEAM_NUMBER_HOME', 'TEAM_NUMBER_AWAY']).size().reset_index(drop=True).rename(columns={0:'count'}).drop('count',axis=1)
+    dim_game = team_game_data.groupby(['GAME_ID', 'SEASON_ID', 'GAME_DATE', 'PAIRING_NUMBER', 'MATCHUP_NUMBER', 'TEAM_NUMBER_HOME', 'TEAM_NUMBER_AWAY']).size().reset_index(drop=False).rename(columns={0:'count'}).drop('count',axis=1)
 
     dim_game = dim_game.merge(dim_season[['SEASON_ID', 'SEASON_NUMBER', 'SEASON_TYPE', 'SEASON_NAME']], how='left', on='SEASON_ID')
 
@@ -495,11 +517,15 @@ def pull_raw_team_game_data(seasons, out_dir, out_file_name, get_upcoming_games=
     if not any([s in ALL_AVAILABLE_SEASONS for s in seasons]):
         raise ValueError('Input vector seasons must be in ALL_AVAILABLE_SEASONS')
 
-        # regular season
+    # regular season
     team_data_basic_list_regseason = [get_basic_game_info(season=s) for s in seasons]
 
     # preseason
     team_data_basic_list_preseason = [get_basic_game_info(season=s, season_type = 'Pre Season') for s in seasons]
+
+        # get four factors and advanced data
+    ff_df = pd.read_csv(raw_dir / 'boxscore_data_four_factors_raw.csv', sep='|', dtype=get_dtypes_dict(raw_dir / 'dtypes_boxscore_data_four_factors_raw.csv'))
+    adv_df = pd.read_csv(raw_dir / 'boxscore_data_advanced_raw.csv', sep='|', dtype=get_dtypes_dict(raw_dir / 'dtypes_boxscore_data_advanced_raw.csv'))
 
     team_data_basic_regseason = pd.concat(team_data_basic_list_regseason)
     team_data_basic_preseason = pd.concat(team_data_basic_list_preseason)
@@ -525,6 +551,14 @@ def pull_raw_team_game_data(seasons, out_dir, out_file_name, get_upcoming_games=
     drop_rows = [True if s in drop_games else False for s in team_data_basic['GAME_ID']]
     team_data_basic = team_data_basic[np.logical_not(drop_rows)]
 
+    # attach four factors and advanced data
+    leave_out_cols = ['TEAM_NAME', 'TEAM_ABBREVIATION', 'MIN']
+    keep_cols_ff = list(set(ff_df.columns) - set(leave_out_cols))
+    keep_cols_adv = list(set(adv_df.columns) - (set(leave_out_cols).union(set(keep_cols_ff)) - set(['GAME_ID', 'TEAM_ID'])) )
+
+    team_data_basic = team_data_basic.merge(ff_df[keep_cols_ff], on=['GAME_ID', 'TEAM_ID'], how='left').reset_index(drop=True)
+    team_data_basic = team_data_basic.merge(adv_df[keep_cols_adv], on=['GAME_ID', 'TEAM_ID'], how='left').reset_index(drop=True)
+
     # add other helpful columns
     team_data_basic['team_recency_rank'] = team_data_basic.sort_values(['GAME_DATE'], ascending=[False]).groupby(['TEAM_ID']).cumcount() + 1
 
@@ -538,25 +572,10 @@ def pull_raw_team_game_data(seasons, out_dir, out_file_name, get_upcoming_games=
 
     team_data_basic = pd.concat([team_data_basic.reset_index(drop=True), home_away_final], axis=1)
 
-#     ff_data = []
-# for x in team_data_basic['GAME_ID'].unique():
-#     got_results = False
-#     while not got_results:
-#         try:
-#             ff_res = get_four_factors_data(x, player_or_team='team')['team']
-#             got_results=True
-#             ff_data.append(ff_res)
-#             print('got results '+str(x))
-#         except:
-#             print('exception')
 
-
-    # ff_data_df = pd.concat(ff_data)
-
-
-    ##################################
-    # get upcoming games
-    ##################################
+        ##################################
+        # get upcoming games
+        ##################################
     if get_upcoming_games:
         upcoming_games_year = int(left(UPCOMING_SEASON, 4))
         game_sched_full = get_full_game_schedule(upcoming_games_year, skeleton=True)
@@ -656,7 +675,6 @@ processed_dir = data_dir / 'processed'
 external_dir = data_dir / 'external'
 dim_dir = processed_dir / 'dim'
 
-
 base_raw_data_file_name = 'team_game_data_raw.csv'
 base_processed_data_file_name = 'team_game_data_processed.csv'
 odds_json_file = external_dir / 'nba/NBA.json'
@@ -688,43 +706,25 @@ processed_odds = process_oddsportal_scrape_output(odds_json_file, dim_dir / 'dim
 
 
 
-def try_get_boxscore_data(x, category, player_or_team='team', max_try=10):
-    num_tries = 1
-    got_results = False
-    while not got_results:
-        try:
-            res = get_boxscore_data(x, category=category, player_or_team=player_or_team)[player_or_team]
-            got_results = True
-            return(res)
-        except:
-            if num_tries == max_try:
-                raise ValueError('DAMN IT')
-            num_tries = num_tries+1
-            print('exception at game_id '+str(x))
 
+# adv_data = get_boxscore_data_list(game_ids, category='advanced')
+# ff_data = get_boxscore_data_list(game_ids, category='four_factors')
 
-def get_boxscore_data_list(game_ids, category='four_factors', end_period=0, player_or_team='team',timeout=10, proxy=None):
-    results = [try_get_boxscore_data(x, category=category, player_or_team=player_or_team) for x in game_ids]
-    return(results)
+# adv_data_df = pd.concat(adv_data)
+# ff_data_df = pd.concat(ff_data)
 
-adv_data = get_boxscore_data_list(game_ids, category='advanced')
-ff_data = get_boxscore_data_list(game_ids, category='four_factors')
-
-adv_data_df = pd.concat(adv_data)
-ff_data_df = pd.concat(ff_data)
-
-dtypes_adv_data = pd.DataFrame({'col_name':adv_data_df.columns, 'type':adv_data_df.dtypes})
-dtypes_ff_data = pd.DataFrame({'col_name':ff_data_df.columns, 'type':ff_data_df.dtypes})
+# dtypes_adv_data = pd.DataFrame({'col_name':adv_data_df.columns, 'type':adv_data_df.dtypes})
+# dtypes_ff_data = pd.DataFrame({'col_name':ff_data_df.columns, 'type':ff_data_df.dtypes})
 
 
 
-adv_data_df.to_csv(raw_dir / 'boxscore_data_advanced_raw.csv', sep='|')
-dtypes_adv_data.to_csv(raw_dir / 'dtypes_boxscore_data_advanced_raw.csv', sep='|')
+# adv_data_df.to_csv(raw_dir / 'boxscore_data_advanced_raw.csv', sep='|', index=False)
+# dtypes_adv_data.to_csv(raw_dir / 'dtypes_boxscore_data_advanced_raw.csv', sep='|', index=False)
 
-ff_data_df.to_csv(raw_dir / 'boxscore_data_four_factors_raw.csv', sep='|')
-dtypes_ff_data.to_csv(raw_dir / 'dtypes_boxscore_data_four_factors_raw.csv', sep='|')
+# ff_data_df.to_csv(raw_dir / 'boxscore_data_four_factors_raw.csv', sep='|', index=False)
+# dtypes_ff_data.to_csv(raw_dir / 'dtypes_boxscore_data_four_factors_raw.csv', sep='|', index=False)
 
 
-adv_data_df.to_csv(raw_dir / 'boxscore_data_advanced_raw_TEST.csv', sep=',')
-ff_data_df.to_csv(raw_dir / 'boxscore_data_four_factors_raw_TEST.csv', sep=',')
+# adv_data_df.to_csv(raw_dir / 'boxscore_data_advanced_raw_TEST.csv', sep=',', index=False)
+# ff_data_df.to_csv(raw_dir / 'boxscore_data_four_factors_raw_TEST.csv', sep=',', index=False)
 

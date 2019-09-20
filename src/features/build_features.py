@@ -3,6 +3,14 @@
 """
 Created on Wed Aug 14 2019
 
+
+feature to add:
+cumulative offensive and defensive rating + adjusted + pythag
+adj tov pct + pythag
+adj efg_pct + pythag
+cumulative pt pct (adj) pythag
+
+
 @author:  zach
 """
 import pandas as pd
@@ -139,13 +147,12 @@ team_stats_per_min = [
 'AST'
 ,'BLK'
 ,'DREB'
-,'FG PCT'
-,'FG3 PCT'
+
 ,'FG3A'
 ,'FG3M'
 ,'FGA'
 ,'FGM'
-,'FT PCT'
+
 ,'FTA '
 ,'FTM'
 ,'OREB'
@@ -183,23 +190,44 @@ cumsum_features = [
 'LOSE',
 'PTS',
 'PTS_TOTAL'
+,'AST'
+,'BLK'
+,'DREB'
+,'FG3A'
+,'FG3M'
+,'FGA'
+,'FGM'
+,'FTA'
+,'FTM'
+,'OREB'
+,'PF'
+,'PLUS_MINUS'
+,'POSS'
+,'REB'
+,'TOV'
 ]
 
 team_data = calc_groupby_feature(team_data, calc_stat_cumsum, cumsum_features, ['TEAM_NUMBER', 'SEASON_NUMBER'], prefix='TEAM_FEATURE_', suffix='_cumulative_sum')
 
 
 # calculate mean features
-mean_features = [s + '_per_min' for s in team_stats_per_min]
+mean_features = [s + '_per_min' for s in team_stats_per_min] + [
+'FG_PCT'
+,'FG3_PCT'
+,'FT_PCT'
+,'OFF_RATING'
+,'DEF_RATING'
+,'EFG_PCT'
+,'TM_TOV_PCT'
+    ]
+
 
 team_data = calc_groupby_feature(team_data, calc_stat_expanding_mean, mean_features, ['TEAM_NUMBER', 'SEASON_NUMBER'], prefix='TEAM_FEATURE_', suffix='_expanding_mean')
 
 # calculate exponentially weighted moving avg features
 ewma_features = mean_features
 
-team_data=calc_groupby_feature(team_data, calc_stat_ewma, ewma_features, groupby_col= ['TEAM_NUMBER', 'SEASON_NUMBER'], prefix='TEAM_FEATURE_', suffix='_ewma')
-
- # add features
-team_data['TEAM_FEATURE_cumulative_win_pct'] = team_data['TEAM_FEATURE_WIN_cumulative_sum'] / team_data['TEAM_FEATURE_cumulative_count_GAME_NUMBER']
+team_data = calc_groupby_feature(team_data, calc_stat_ewma, ewma_features, groupby_col= ['TEAM_NUMBER', 'SEASON_NUMBER'], prefix='TEAM_FEATURE_', suffix='_ewma')
 
 
 # calculate same features for home games vs. away
@@ -232,9 +260,36 @@ team_data_away= calc_groupby_feature(team_data_away, calc_stat_ewma, ewma_featur
 # win pct
 team_data_home['TEAM_FEATURE_cumulative_win_pct_HOME'] = team_data_home['TEAM_FEATURE_WIN_cumulative_sum'] / team_data_home['TEAM_FEATURE_cumulative_count_GAME_NUMBER']
 team_data_away['TEAM_FEATURE_cumulative_win_pct_AWAY'] = team_data_away['TEAM_FEATURE_WIN_cumulative_sum'] / team_data_away['TEAM_FEATURE_cumulative_count_GAME_NUMBER']
+
 # point pct of total
 team_data_home['TEAM_FEATURE_cumulative_pt_pct_HOME'] = team_data_home['TEAM_FEATURE_PTS_cumulative_sum'] / team_data_home['TEAM_FEATURE_PTS_TOTAL_cumulative_sum']
 team_data_away['TEAM_FEATURE_cumulative_pt_pct_AWAY'] = team_data_away['TEAM_FEATURE_PTS_cumulative_sum'] / team_data_away['TEAM_FEATURE_PTS_TOTAL_cumulative_sum']
+
+# tov pct cumulative
+team_data_home['TEAM_FEATURE_TM_TOV_PCT_cumulative_HOME'] = team_data_home['TEAM_FEATURE_TOV_cumulative_sum'] / team_data_home['TEAM_FEATURE_POSS_cumulative_sum']
+team_data_away['TEAM_FEATURE_TM_TOV_PCT_cumulative_AWAY'] = team_data_away['TEAM_FEATURE_TOV_cumulative_sum'] / team_data_away['TEAM_FEATURE_POSS_cumulative_sum']
+
+
+# efg pct
+team_data_home['TEAM_FEATURE_EFG_PCT_cumulative_HOME'] = (team_data_home['TEAM_FEATURE_FGM_cumulative_sum'] + 0.5*team_data_home['TEAM_FEATURE_FG3M_cumulative_sum']) / team_data_home['TEAM_FEATURE_FGA_cumulative_sum']
+team_data_away['TEAM_FEATURE_EFG_PCT_cumulative_AWAY'] = (team_data_away['TEAM_FEATURE_FGM_cumulative_sum'] + 0.5*team_data_away['TEAM_FEATURE_FG3M_cumulative_sum']) / team_data_away['TEAM_FEATURE_FGA_cumulative_sum']
+
+# pythag cumulative pt pct ewma
+team_data_home['TEAM_FEATURE_OFF_RATING_ewma_pythag_HOME'] = pythagorean_exp(team_data_home['TEAM_FEATURE_OFF_RATING_ewma'], team_data_home['TEAM_FEATURE_DEF_RATING_ewma'], team_data_home['TEAM_FEATURE_cumulative_count_GAME_NUMBER'])
+team_data_away['TEAM_FEATURE_OFF_RATING_ewma_pythag_AWAY'] = pythagorean_exp(team_data_away['TEAM_FEATURE_OFF_RATING_ewma'], team_data_away['TEAM_FEATURE_DEF_RATING_ewma'], team_data_away['TEAM_FEATURE_cumulative_count_GAME_NUMBER'])
+
+
+
+ # add features
+team_data['TEAM_FEATURE_cumulative_win_pct'] = team_data['TEAM_FEATURE_WIN_cumulative_sum'] / team_data['TEAM_FEATURE_cumulative_count_GAME_NUMBER']
+
+team_data['TEAM_FEATURE_EFG_PCT_cumulative'] = (team_data['TEAM_FEATURE_FGM_cumulative_sum'] + 0.5*team_data['TEAM_FEATURE_FG3M_cumulative_sum']) / team_data['TEAM_FEATURE_FGA_cumulative_sum']
+
+team_data['TEAM_FEATURE_TM_TOV_PCT_cumulative'] = team_data['TEAM_FEATURE_TOV_cumulative_sum'] / team_data['TEAM_FEATURE_POSS_cumulative_sum']
+
+team_data['TEAM_FEATURE_OFF_RATING_ewma_pythag'] = pythagorean_exp(team_data['TEAM_FEATURE_OFF_RATING_ewma'], team_data['TEAM_FEATURE_DEF_RATING_ewma'], team_data['TEAM_FEATURE_cumulative_count_GAME_NUMBER'])
+
+
 
 # add targets
 home_cols = [s for s in team_data_home.columns if s.endswith('_HOME') and s.startswith(('TEAM_FEATURE_', 'GAME_NUMBER_', 'TARGET_'))]
@@ -267,7 +322,7 @@ team_feature_cols = [s for s in team_data.columns if s.startswith('TEAM_FEATURE_
 
 other_pivot_cols = ['WIN_HOME', 'WIN_AWAY']
 
-team_data_new = team_data.set_index(['GAME_NUMBER', 'WIN_HOME'], drop=True)
+team_data_new = team_data.set_index(['GAME_NUMBER', 'WIN_HOME', 'WIN_AWAY'], drop=True)
 
 team_data_pivot = multiindex_pivot(team_data_new, columns='TEAM_HOME_OR_AWAY',  values=team_feature_cols)
 
@@ -314,8 +369,9 @@ train_data = train_data[train_data['GAME_DATE'] <= '2019-08-22']
 
 dim_season = pd.read_csv(dim_dir / 'dim_season.csv', sep='|')
 
-
-train_data = train_data.merge(dim_season, on='SEASON_NUMBER', how='left')
+leave_out_cols = set(dim_season.columns).intersection(set(train_data.columns)) - set(['SEASON_NUMBER'])
+keep_cols = list(set(dim_season.columns) - leave_out_cols)
+train_data = train_data.merge(dim_season[keep_cols], on='SEASON_NUMBER', how='left')
 
 odds_data.to_csv(processed_dir / 'test_odds.csv', sep=',', index=False)
 
