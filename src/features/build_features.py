@@ -314,6 +314,7 @@ team_data = pd.concat([team_data, court_col_df], axis=1)
 team_data['WIN_HOME'] = team_data['TEAM_IS_HOME_TEAM'] * team_data['WIN'] + team_data['TEAM_IS_AWAY_TEAM'] * team_data['LOSE']
 team_data['WIN_AWAY'] = 1 - team_data['WIN_HOME']
 
+
 #team_data.to_csv(raw_dir / 'features_check.csv',  sep=',', index=False)
 
 # pivot on home_vs_away
@@ -359,6 +360,10 @@ train_data['GAME_DATE_week_number'] = [s.isocalendar()[1] for s in train_data['G
 
 train_data['GAME_DATE_year'] = [s.isocalendar()[0] for s in train_data['GAME_DATE_date']]
 
+# A few more features
+train_data['TEAM_FEATURE_cumulative_pt_pct_pythag_COURT_HOME'] = pythagorean_exp(train_data['TEAM_FEATURE_cumulative_pt_pct_COURT_HOME'], train_data['TEAM_FEATURE_cumulative_pt_pct_COURT_AWAY'], train_data['TEAM_FEATURE_TEAM_IS_HOME_TEAM_cumulative_sum_HOME'])
+
+train_data['TEAM_FEATURE_cumulative_pt_pct_pythag_COURT_AWAY'] = pythagorean_exp(train_data['TEAM_FEATURE_cumulative_pt_pct_COURT_AWAY'], train_data['TEAM_FEATURE_cumulative_pt_pct_COURT_HOME'], train_data['TEAM_FEATURE_TEAM_IS_AWAY_TEAM_cumulative_sum_AWAY'])
 
 # limit to regular season
 train_data = train_data[train_data['SEASON_TYPE'] == 'Regular Season']

@@ -24,6 +24,7 @@ import multiprocessing as mp
 from numpy.random import seed
 from functools import reduce
 import scipy.optimize as sco
+import featexp
 
 
 import pickle
@@ -65,7 +66,7 @@ def accuracy(pred, obs):
 def plot_xgb_feat_importance(model_obj, predictors, importance_type='gain', color='red', max_num_features=50):
     mapper = {'f{0}'.format(i): v for i, v in enumerate(predictors)}
     mapped = {mapper[k]: v for k, v in model_obj.get_booster().get_score().items()}
-    fig = plt.figure(dpi=180)
+    #fig = plt.figure(dpi=180)
     ax = plt.subplot(1,1,1)
     xgb.plot_importance(mapped, color=color, max_num_features=max_num_features, importance_type=importance_type)
 
@@ -211,10 +212,17 @@ def calc_total_profit(test_data, **kwargs):
     out['total_exp_profit'] = [test_data['exp_profit'].sum()]
     out['total_bets_placed'] = [test_data['place_bet'].sum()]
     out['total_correct_bets'] = [test_data['correct_bet'].sum()]
+    out['correct_bet_pct'] = out['total_correct_bets'] / out['total_bets_placed']
     out['total_games'] = [test_data.shape[0]]
     out['total_available_bets'] = [test_data.shape[0] - test_data['odds_home'].isna().sum()]
-
-
+    out['total_bet_amount_home'] = test_data['bet_home'].sum()
+    out['total_bet_amount_away'] = test_data['bet_away'].sum()
+    out['total_bet_amount'] = [out['total_bet_amount_home'] + out['total_bet_amount_away']]
+    out['max_profit'] = test_data['profit'].max()
+    out['min_profit'] = test_data['profit'].min()
+    out['sd_profit'] = sqrt(variance_cumulative_profit(test_data))
+    out['sharpe_ratio_profit'] = out['total_exp_profit'] / out['sd_profit']
+    out['roi'] = out['total_profit'] / out['total_bet_amount']
     return(out)
 
 
@@ -224,6 +232,12 @@ def indicate(x):
 
 
 def calc_bet_distribution(test_data, **kwargs):
+
+    if 'conf_threshold' in kwargs.keys():
+        conf_threshold = kwargs['conf_threshold']
+    else:
+        conf_threshold = 0
+
     test_data['positive_expectation_HOME'] = indicate(test_data['prob_WIN_HOME'] - 1/test_data['odds_dec_home'])
     test_data['positive_expectation_AWAY'] = indicate((1 - test_data['prob_WIN_HOME']) - 1/test_data['odds_dec_away'])
 
@@ -238,7 +252,7 @@ def calc_bet_distribution(test_data, **kwargs):
         bet_budget = 1
 
     if bet_dist_type == 'opt':
-        max_sharpe_ratio(test_data)
+        max_sharpe_ratio(test_data, conf_threshold)
         test_data['bet_home'] = test_data['bet_budget_pct_home'] * bet_budget
         test_data['bet_away'] = test_data['bet_budget_pct_away'] * bet_budget
         test_data['place_bet_home'] = (test_data['bet_home'] > 0.001)*1
@@ -437,9 +451,14 @@ def max_sharpe_ratio2(p, o):
     best_bets = result['x']
     return best_bets
 
-def max_sharpe_ratio(test_data):
+def max_sharpe_ratio(test_data, conf_threshold=0):
     dat_copy = test_data.copy()
-    valid_rows = dat_copy.index[[False if x else True for x in dat_copy['odds_dec_home'].isna()]].tolist()
+    valid_rows = dat_copy.index[[False if (x) or (abs(y-0.5) <= conf_threshold ) else True for x,y in zip(dat_copy['odds_dec_home'].isna(), dat_copy['prob_WIN_HOME']) ]].tolist()
+
+    if len(valid_rows) == 0:
+        test_data['bet_budget_pct_home'] = 0
+        test_data['bet_budget_pct_away'] = 0
+        return(test_data)
 
     dat_copy = dat_copy.loc[valid_rows]
 
@@ -664,11 +683,21 @@ predictors = [
 'GAME_DATE_week_number'
 ]
 
+predictors = [
+'TEAM_FEATURE_cumulative_win_pct_COURT_AWAY',
+'TEAM_FEATURE_cumulative_win_pct_COURT_HOME',
+'TEAM_FEATURE_cumulative_pt_pct_COURT_AWAY',
+'TEAM_FEATURE_cumulative_pt_pct_COURT_HOME',
+'TEAM_FEATURE_OFF_RATING_ewma_pythag_HOME_adj',
+'TEAM_FEATURE_OFF_RATING_ewma_pythag_AWAY_adj',
+#'implied_prob_home',
+#'implied_prob_away',
+]
 
 model_param_dict = {
     'learning_rate':[0.05],
-    'n_estimators':[25],
-    'max_depth':[5],
+    'n_estimators':[10],
+    'max_depth':[3],
     'min_child_weight':[1],
     'gamma':[0.5],
     'subsample':[0.8],
@@ -677,9 +706,10 @@ model_param_dict = {
     'nthread':[1],
     'scale_pos_weight':[1],
     'seed':[29],
-    'train_frac':[0.9],
+    'train_frac':[0.5],
     'bet_dist_type':['opt'],
-    'bet_budget':[100]
+    'bet_budget':[100],
+    'conf_threshold':[0.1]
 }
 
 
@@ -727,13 +757,14 @@ bet_round_var = ['GAME_DATE_year','GAME_DATE_week_number']
 
 rounds = train_data_init.groupby(modeling_round_var + bet_round_var).size().reset_index().drop(0, axis=1)
 
-start_ind = 45
+start_ind = 106
 current_modeling_round = rounds.loc[start_ind,modeling_round_var][0]
 recommender = None
 cumulative_profit = 0
 cumulative_correct_bets = 0
 cumulative_bets = 0
-stop_ind = 47
+cumulative_bet_amount = 0
+stop_ind = 128
 
 for j in range(start_ind, stop_ind):
     test_round = rounds.iloc[j:j+1,:].reset_index(drop=True)
@@ -754,14 +785,45 @@ for j in range(start_ind, stop_ind):
     cumulative_profit = cumulative_profit + results['bet']['total_profit'][0]
     cumulative_correct_bets = cumulative_correct_bets + results['bet']['total_correct_bets'][0]
     cumulative_bets = cumulative_bets + results['bet']['total_bets_placed'][0]
-    print(cumulative_profit)
-    print(cumulative_correct_bets)
+    cumulative_bet_amount = cumulative_bet_amount + results['bet']['total_bet_amount'][0]
+
+    cumulative_roi = cumulative_profit / cumulative_bet_amount
+    print()
+    print('iteration ' + str(j))
+    print('profit: '+str(results['bet']['total_profit']))
+    print('correct bet %: '+str(results['bet']['correct_bet_pct'][0]))
+    print('roi: '+str(results['bet']['roi'][0]))
+    print('sharpe ratio: '+str(results['bet']['sharpe_ratio_profit'][0]))
+    print('accuracy: '+str(results['model']['accuracy'][0]))
+    print('cumulative profit: '+str(cumulative_profit))
+    print('cumulative roi: '+str(cumulative_roi))
 
 
 mod = recommender.modeler.model_object
 plot_xgb_feat_importance(mod.base_estimator, predictors, 'gain', 'blue', 30)
 
 
+
+train1 = train_data_init[train_data_init['SEASON_NUMBER']<=15]
+test1 = train_data_init[train_data_init['SEASON_NUMBER']>15]
+
+
+featexp.get_univariate_plots(data=train_dat, target_col=target,
+                     features_list=['TEAM_FEATURE_cumulative_pt_pct_COURT_AWAY'], bins=10)
+
+test_dat.shape
+featexp.get_univariate_plots(data=train1, target_col=target, data_test=test1, features_list=['TEAM_FEATURE_cumulative_pt_pct_pythag_COURT_HOME'])
+
+featexp.get_univariate_plots(data=train1, target_col=target, data_test=test1, features_list=['TEAM_FEATURE_OFF_RATING_ewma_pythag_AWAY_adj'])
+
+featexp.get_univariate_plots(data=train1, target_col=target, data_test=test1, features_list=['TEAM_FEATURE_OFF_RATING_ewma_pythag_HOME'])
+
+stats = featexp.get_trend_stats(data=train1[predictors+[target]], target_col=target, data_test=test1)
+
+
+stats.to_csv(processed_dir / 'featexp_stats.csv', index=False, sep=',')
+
+stats_keep = stats[(stats['Trend_changes'] == 0) & (stats['Trend_changes_test'] == 0) & (stats['Trend_correlation'] >= 0.97)]
 # to do - build loop for train/test
 # to do - add cumulative profit and results tracker
 

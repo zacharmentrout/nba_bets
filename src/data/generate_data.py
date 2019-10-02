@@ -49,6 +49,18 @@ def odds2prob_ml(odds):
 def convert_odds_american_to_decimal(odds):
     return(1/odds2prob_ml(odds))
 
+def quartile1(x):
+    return (np.nanpercentile(x, 25))
+
+def quartile3(x):
+    return (np.nanpercentile(x, 75))
+
+def multiple_replace(dict,  text):
+    # Create a regular expression  from the dictionary keys
+    regex = re.compile("(%s)" % "|".join(map(re.escape,  dict.keys())))
+    # For each match,  look-up corresponding value in dictionary
+    return regex.sub(lambda mo:  dict[mo.string[mo.start(): mo.end()]],  text)
+
 
 def transform_stats_df(stats_df, df_index, stats_obj_class):
     if stats_obj_class == BoxScoreTraditionalV2 and df_index == 2:
@@ -618,53 +630,94 @@ def convert_oddsportal_scrape_output_to_dataframe(odds_json_file):
     with open(odds_json_file, "r") as read_file:
         odds_dict = json.load(read_file)
     seasons = odds_dict['league']['seasons']
-    odds_output_list = [pd.DataFrame(s['games']) for s in seasons if len(s['games']) > 0 ]
-    odds_output_df = pd.concat(odds_output_list)
+    odds_output_list1 = [pd.DataFrame(s['games']) for s in seasons if len(s['games']) > 0 ]
+    odds_output_df1 = pd.concat(odds_output_list1)
+    odds_output_list2 = [pd.DataFrame(ol) for ol in odds_output_df1['odds_list']]
+    odds_output_df2 = pd.concat(odds_output_list2)
+    odds_output_df1.rename(columns={'odds_home':'avg_odds_home', 'odds_away':'avg_odds_away', 'odds_draw':'avg_odds_draw'}, inplace=True)
+    odds_output_df = odds_output_df1.merge(odds_output_df2[['game_url', 'bookmaker', 'odds_home', 'odds_away', 'odds_draw']], on='game_url', how='left')
+    odds_output_df.drop(['odds_list', 'odds_draw', 'avg_odds_draw'],axis=1, inplace=True)
     return(odds_output_df)
 
 def process_oddsportal_scrape_output(odds_json_file, dim_team_file, dim_team_dtypes_file, out_dir=None, out_file_name=None):
     odds_df = convert_oddsportal_scrape_output_to_dataframe(odds_json_file)
-
-    cols_to_float = ['odds_home', 'odds_away']
-
+    cols_to_float = ['avg_odds_home', 'avg_odds_away', 'odds_home', 'odds_away']
     odds_df[cols_to_float] = odds_df[cols_to_float].astype('float64')
-
     odds_df['GAME_DATE'] = convert_string_to_date(odds_df['game_datetime'])
-
     odds_df['odds_dec_home'] = [convert_odds_american_to_decimal(x) for x in odds_df['odds_home']]
     odds_df['odds_dec_away'] = [convert_odds_american_to_decimal(x) for x in odds_df['odds_away']]
-    odds_df['implied_prob_home'] = [odds2prob_ml(x) for x in odds_df['odds_home']]
-    odds_df['implied_prob_away'] = [odds2prob_ml(x) for x in odds_df['odds_away']]
+    odds_df['implied_prob_home'] = [odds2prob_ml(x) for x in odds_df['avg_odds_home']]
+    odds_df['implied_prob_away'] = [odds2prob_ml(x) for x in odds_df['avg_odds_away']]
     odds_df['adj_implied_prob_home'] = [x / (x+y) for x,y in zip(odds_df['implied_prob_home'], odds_df['implied_prob_away'])]
     odds_df['adj_implied_prob_away'] = [y / (x+y) for x,y in zip(odds_df['implied_prob_home'], odds_df['implied_prob_away'])]
+
+
+    # aggregate odds summary statistics and pivot
+    odds = odds_df.copy()
+    odds.set_index(['game_url'], inplace=True,  drop=False)
+    odds_grouped = odds[['odds_dec_home',  'odds_dec_away']].groupby(['game_url'])
+    agg_odds = odds_grouped.agg([np.size
+                                 ,  np.mean
+                                 ,  np.std
+                                 ,  np.min
+                                 ,  quartile1
+                                 ,  np.median
+                                 ,  quartile3
+                                 ,  np.max])
+
+    names_agg_odds = list(agg_odds.columns.values)
+    new_names_agg_odds = [str(o[1])+'_'+str(o[0]) for o in names_agg_odds]
+    agg_odds.columns = new_names_agg_odds
+
+    #todo: add max odds bookmaker
+
+    odds_pivot = odds.pivot(columns='bookmaker',  values=['odds_dec_home'
+                                                   ,  'odds_dec_away'
+                                                   ])
+
+    old_names = list(odds_pivot.columns.values)
+    new_names = [str(o[0])+'_'+str(o[1]) for o in old_names]
+    odds_pivot.columns = new_names
+
+    odds_pivot.columns = [multiple_replace({'-':'_', ' ':'_'},c) for c in odds_pivot.columns]
+
+    odds_pivot.drop(['odds_dec_home_nan', 'odds_dec_away_nan'],axis=1)
+
+    odds_pivot['game_url'] = odds_pivot.index
+    odds_pivot.reset_index(drop=True, inplace=True)
+    odds_base = odds_df.groupby(['retrieval_url', 'retrieval_datetime', 'game_datetime', 'game_url',
+       'num_possible_outcomes', 'team_home', 'team_away', 'avg_odds_home',
+       'avg_odds_away', 'outcome', 'score_home', 'score_away', 'GAME_DATE',
+       'implied_prob_home', 'implied_prob_away', 'adj_implied_prob_home',
+       'adj_implied_prob_away']).size().reset_index(drop=False).rename(columns={0:'count'}).drop('count',axis=1)
+    #todo: merge odds pivot, agg_odds, and odds_df by game
+    odds_out = odds_base.merge(agg_odds, how='left', on=['game_url'])
+    odds_out = odds_out.merge(odds_pivot, how='left', on=['game_url'])
 
     dim_team_dtypes = get_dtypes_dict(dim_team_dtypes_file)
     dim_team = pd.read_csv(dim_team_file, sep='|', dtype=dim_team_dtypes)
 
-    la_clippers_home_rows = odds_df['team_home'] == 'Los Angeles Clippers'
-    la_clippers_away_rows = odds_df['team_away'] == 'Los Angeles Clippers'
+    la_clippers_home_rows = odds_out['team_home'] == 'Los Angeles Clippers'
+    la_clippers_away_rows = odds_out['team_away'] == 'Los Angeles Clippers'
 
-    odds_df.loc[la_clippers_home_rows, 'team_home'] = 'LA Clippers'
-    odds_df.loc[la_clippers_away_rows, 'team_away'] = 'LA Clippers'
+    odds_out.loc[la_clippers_home_rows, 'team_home'] = 'LA Clippers'
+    odds_out.loc[la_clippers_away_rows, 'team_away'] = 'LA Clippers'
 
-    odds_df = merge_with_prefix_or_suffix(odds_df, dim_team[['TEAM_NUMBER', 'TEAM_NAME']], how='left', left_on='team_home', right_on='TEAM_NAME', suffix='_HOME')
-    odds_df = merge_with_prefix_or_suffix(odds_df, dim_team[['TEAM_NUMBER', 'TEAM_NAME']], how='left', left_on='team_away', right_on='TEAM_NAME', suffix='_AWAY')
+    odds_out = merge_with_prefix_or_suffix(odds_out, dim_team[['TEAM_NUMBER', 'TEAM_NAME']], how='left', left_on='team_home', right_on='TEAM_NAME', suffix='_HOME')
+    odds_out = merge_with_prefix_or_suffix(odds_out, dim_team[['TEAM_NUMBER', 'TEAM_NAME']], how='left', left_on='team_away', right_on='TEAM_NAME', suffix='_AWAY')
 
     cols_to_int = ['TEAM_NUMBER_HOME', 'TEAM_NUMBER_AWAY']
 
-    odds_df[cols_to_int] = odds_df[cols_to_int].fillna(-1).astype('int64')
+    odds_out[cols_to_int] = odds_out[cols_to_int].fillna(-1).astype('int64')
 
-    odds_df.drop_duplicates(subset=['game_datetime', 'TEAM_NUMBER_HOME', 'TEAM_NUMBER_AWAY'], inplace=True)
+    odds_out.drop_duplicates(subset=['game_datetime', 'TEAM_NUMBER_HOME', 'TEAM_NUMBER_AWAY'], inplace=True)
 
     if out_dir is not None:
-        dtypes = pd.DataFrame({'col_name':odds_df.columns, 'type':odds_df.dtypes})
+        dtypes = pd.DataFrame({'col_name':odds_out.columns, 'type':odds_out.dtypes})
         dtypes.to_csv(out_dir / (left(out_file_name, len(out_file_name)-4) + '_dtypes.csv'), sep='|', index=False)
-        odds_df.to_csv(out_dir / out_file_name, sep='|', index=False)
+        odds_out.to_csv(out_dir / out_file_name, sep='|', index=False)
 
-    return(odds_df)
-
-
-
+    return(odds_out)
 
 data_location = '/Users/zach/Documents/git/nba_bets/data'
 
