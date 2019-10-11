@@ -27,6 +27,7 @@ import scipy.optimize as sco
 import featexp
 from joblib import delayed
 from joblib import Parallel
+import re
 
 import pickle
 
@@ -869,17 +870,19 @@ simulator = Simulator(param_dict_list=model_params, training_data=train_data_ini
 simulator.simulate()
 sim_out = simulator.simulation_output()
 
+for a in agg_param_names:
+    if sim_out.dtypes[a] != 'object':
+        continue
+    sim_out[a] = [re.sub('<function | at.*?>', '', s) for s in sim_out[a]]
+
 # figure out window function for sim_out
 sim_out['param_num'] = sim_out[agg_param_names].apply(lambda x: reduce(lambda a, b: str(a) + str(b), x), axis=1).rank(method='dense', ascending=True)
 
 mod = simulation.recommender.modeler.model_object
 plot_xgb_feat_importance(mod.base_estimator, predictors, 'gain', 'blue', 30)
 
-
-
 train1 = train_data_init[train_data_init['SEASON_NUMBER']<=15]
 test1 = train_data_init[train_data_init['SEASON_NUMBER']>15]
-
 
 featexp.get_univariate_plots(data=train_dat, target_col=target,
                      features_list=['TEAM_FEATURE_cumulative_pt_pct_COURT_AWAY'], bins=10)
