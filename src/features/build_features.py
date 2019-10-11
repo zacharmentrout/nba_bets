@@ -347,11 +347,32 @@ dim_game = pd.read_csv(dim_dir / 'dim_game.csv', sep='|', dtype=dim_game_dtypes)
 train_data = dim_game.merge(team_data_pivot, how='left', on='GAME_NUMBER')
 
 # add odds data
-odds_cols = ['odds', 'odds_dec', 'implied_prob', 'adj_implied_prob']
-odds_cols_home = [x+'_home' for x in odds_cols]
-odds_cols_away = [x+'_away' for x in odds_cols]
+odds_cols = ['avg_odds_home',
+       'avg_odds_away', 'outcome', 'score_home', 'score_away',
+       'implied_prob_home', 'implied_prob_away', 'adj_implied_prob_home',
+       'adj_implied_prob_away', 'size_odds_dec_home', 'mean_odds_dec_home',
+       'std_odds_dec_home', 'amin_odds_dec_home', 'quartile1_odds_dec_home',
+       'median_odds_dec_home', 'quartile3_odds_dec_home', 'amax_odds_dec_home',
+       'size_odds_dec_away', 'mean_odds_dec_away', 'std_odds_dec_away',
+       'amin_odds_dec_away', 'quartile1_odds_dec_away', 'median_odds_dec_away',
+       'quartile3_odds_dec_away', 'amax_odds_dec_away', 'odds_dec_home_nan',
+       'odds_dec_home_18bet', 'odds_dec_home_1xBet', 'odds_dec_home_Asianodds',
+       'odds_dec_home_Bethard', 'odds_dec_home_Coolbet',
+       'odds_dec_home_Marathonbet', 'odds_dec_home_Pinnacle',
+       'odds_dec_home_Unibet', 'odds_dec_home_William_Hill',
+       'odds_dec_home_bet_at_home', 'odds_dec_home_bet365',
+       'odds_dec_home_bwin', 'odds_dec_away_nan', 'odds_dec_away_18bet',
+       'odds_dec_away_1xBet', 'odds_dec_away_Asianodds',
+       'odds_dec_away_Bethard', 'odds_dec_away_Coolbet',
+       'odds_dec_away_Marathonbet', 'odds_dec_away_Pinnacle',
+       'odds_dec_away_Unibet', 'odds_dec_away_William_Hill',
+       'odds_dec_away_bet_at_home', 'odds_dec_away_bet365',
+       'odds_dec_away_bwin']
 
-train_data = train_data.merge(odds_data[odds_cols_home + odds_cols_away + ['GAME_DATE', 'TEAM_NUMBER_HOME', 'TEAM_NUMBER_AWAY']], how='left', on=['GAME_DATE', 'TEAM_NUMBER_HOME', 'TEAM_NUMBER_AWAY'])
+# odds_cols_home = [x+'_home' for x in odds_cols]
+# odds_cols_away = [x+'_away' for x in odds_cols]
+
+train_data = train_data.merge(odds_data[odds_cols + ['GAME_DATE', 'TEAM_NUMBER_HOME', 'TEAM_NUMBER_AWAY']], how='left', on=['GAME_DATE', 'TEAM_NUMBER_HOME', 'TEAM_NUMBER_AWAY'])
 
 
 train_data['GAME_DATE_date'] = [dt.datetime.strptime(s, '%Y-%m-%d').date()for s in train_data['GAME_DATE']]
@@ -364,6 +385,27 @@ train_data['GAME_DATE_year'] = [s.isocalendar()[0] for s in train_data['GAME_DAT
 train_data['TEAM_FEATURE_cumulative_pt_pct_pythag_COURT_HOME'] = pythagorean_exp(train_data['TEAM_FEATURE_cumulative_pt_pct_COURT_HOME'], train_data['TEAM_FEATURE_cumulative_pt_pct_COURT_AWAY'], train_data['TEAM_FEATURE_TEAM_IS_HOME_TEAM_cumulative_sum_HOME'])
 
 train_data['TEAM_FEATURE_cumulative_pt_pct_pythag_COURT_AWAY'] = pythagorean_exp(train_data['TEAM_FEATURE_cumulative_pt_pct_COURT_AWAY'], train_data['TEAM_FEATURE_cumulative_pt_pct_COURT_HOME'], train_data['TEAM_FEATURE_TEAM_IS_AWAY_TEAM_cumulative_sum_AWAY'])
+
+train_data['TEAM_FEATURE_OFF_RATING_ewma_HOME_adj'] = train_data['TEAM_FEATURE_OFF_RATING_ewma_HOME'] * train_data['TEAM_FEATURE_DEF_RATING_ewma_AWAY'] / 100
+train_data['TEAM_FEATURE_OFF_RATING_ewma_AWAY_adj'] = train_data['TEAM_FEATURE_OFF_RATING_ewma_AWAY'] * train_data['TEAM_FEATURE_DEF_RATING_ewma_HOME'] / 100
+
+train_data['TEAM_FEATURE_DEF_RATING_ewma_HOME_adj'] = train_data['TEAM_FEATURE_DEF_RATING_ewma_HOME'] * train_data['TEAM_FEATURE_OFF_RATING_ewma_AWAY'] / 100
+train_data['TEAM_FEATURE_DEF_RATING_ewma_AWAY_adj'] = train_data['TEAM_FEATURE_DEF_RATING_ewma_AWAY'] * train_data['TEAM_FEATURE_OFF_RATING_ewma_HOME'] / 100
+
+train_data['TEAM_FEATURE_OFF_RATING_ewma_pythag_HOME_adj'] = pythagorean_exp(train_data['TEAM_FEATURE_OFF_RATING_ewma_HOME_adj'], train_data['TEAM_FEATURE_DEF_RATING_ewma_HOME_adj'], train_data['TEAM_FEATURE_cumulative_count_GAME_NUMBER_HOME'])
+train_data['TEAM_FEATURE_OFF_RATING_ewma_pythag_AWAY_adj'] = pythagorean_exp(train_data['TEAM_FEATURE_OFF_RATING_ewma_AWAY_adj'], train_data['TEAM_FEATURE_DEF_RATING_ewma_AWAY_adj'], train_data['TEAM_FEATURE_cumulative_count_GAME_NUMBER_AWAY'])
+
+train_data['TEAM_FEATURE_cumulative_pt_pct_COURT_HOME_AWAY_diff'] =train_data['TEAM_FEATURE_cumulative_pt_pct_COURT_HOME'] - train_data['TEAM_FEATURE_cumulative_pt_pct_COURT_AWAY']
+
+train_data['TEAM_FEATURE_cumulative_pt_pct_COURT_HOME_AWAY_frac'] =train_data['TEAM_FEATURE_cumulative_pt_pct_COURT_HOME'] /train_data['TEAM_FEATURE_cumulative_pt_pct_COURT_AWAY']
+
+train_data['TEAM_FEATURE_cumulative_win_pct_COURT_HOME_AWAY_diff'] =train_data['TEAM_FEATURE_cumulative_win_pct_COURT_HOME'] - train_data['TEAM_FEATURE_cumulative_win_pct_COURT_AWAY']
+
+train_data['TEAM_FEATURE_cumulative_win_pct_COURT_HOME_AWAY_frac'] =train_data['TEAM_FEATURE_cumulative_win_pct_COURT_HOME'] /train_data['TEAM_FEATURE_cumulative_win_pct_COURT_AWAY']
+
+train_data['TEAM_FEATURE_cumulative_pt_pct_COURT_pythag_HOME'] = pythagorean_exp(train_data['TEAM_FEATURE_cumulative_pt_pct_COURT_HOME'], train_data['TEAM_FEATURE_cumulative_pt_pct_COURT_AWAY'], train_data['TEAM_FEATURE_cumulative_count_GAME_NUMBER_HOME'])
+
+train_data['TEAM_FEATURE_cumulative_win_pct_COURT_pythag_HOME'] = pythagorean_exp(train_data['TEAM_FEATURE_cumulative_win_pct_COURT_HOME'], train_data['TEAM_FEATURE_cumulative_win_pct_COURT_AWAY'], train_data['TEAM_FEATURE_cumulative_count_GAME_NUMBER_HOME'])
 
 # limit to regular season
 train_data = train_data[train_data['SEASON_TYPE'] == 'Regular Season']
@@ -378,9 +420,9 @@ leave_out_cols = set(dim_season.columns).intersection(set(train_data.columns)) -
 keep_cols = list(set(dim_season.columns) - leave_out_cols)
 train_data = train_data.merge(dim_season[keep_cols], on='SEASON_NUMBER', how='left')
 
-odds_data.to_csv(processed_dir / 'test_odds.csv', sep=',', index=False)
+#odds_data.to_csv(processed_dir / 'test_odds.csv', sep=',', index=False)
 
-train_data.to_csv(raw_dir / 'features_check.csv',  sep=',', index=False)
+#train_data.to_csv(raw_dir / 'features_check.csv',  sep=',', index=False)
 
 train_data.to_csv(processed_dir / 'training_data.csv',  sep='|', index=False)
 # to do:

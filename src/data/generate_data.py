@@ -642,7 +642,10 @@ def convert_oddsportal_scrape_output_to_dataframe(odds_json_file):
 def process_oddsportal_scrape_output(odds_json_file, dim_team_file, dim_team_dtypes_file, out_dir=None, out_file_name=None):
     odds_df = convert_oddsportal_scrape_output_to_dataframe(odds_json_file)
     cols_to_float = ['avg_odds_home', 'avg_odds_away', 'odds_home', 'odds_away']
-    odds_df[cols_to_float] = odds_df[cols_to_float].astype('float64')
+    # odds_df[cols_to_float] = odds_df[cols_to_float].astype('float64')
+    odds_df[cols_to_float] = pd.concat([pd.to_numeric(odds_df[x],errors='coerce') for x in cols_to_float], axis=1)
+
+
     odds_df['GAME_DATE'] = convert_string_to_date(odds_df['game_datetime'])
     odds_df['odds_dec_home'] = [convert_odds_american_to_decimal(x) for x in odds_df['odds_home']]
     odds_df['odds_dec_away'] = [convert_odds_american_to_decimal(x) for x in odds_df['odds_away']]
