@@ -59,7 +59,12 @@ ODDS_COL_AWAY = 'amax_odds_dec_away'
 ##################
 # functions
 ##################
+def quartile1(x):
+    return (np.nanpercentile(x, 25))
 
+
+def quartile3(x):
+    return (np.nanpercentile(x, 75))
 
 def accuracy(pred, obs):
     if len(pred) != len(obs):
@@ -847,6 +852,7 @@ class Simulator:
         self.target = target
 
         self.simulations = None
+        self.sim_output = None
 
     def simulate(self, max_parallel_cpus=-1):
         self.simulations = Parallel(n_jobs=max_parallel_cpus)(delayed(self.run_simulation)(param_dict) for param_dict in self.param_dict_list)
@@ -859,10 +865,21 @@ class Simulator:
     def simulation_output(self):
         if (self.simulations is None):
             return []
-        return pd.concat([s.sim_results for s in self.simulations]).reset_index(drop=True)
+        sim_out = pd.concat([s.sim_results for s in self.simulations]).reset_index(drop=True)
+        agg_param_names = list(set(model_param_dict.keys()) - set(['seed']))
+        for a in agg_param_names:
+            if sim_out.dtypes[a] != 'object':
+                continue
+            sim_out[a] = [re.sub('<function | at.*?>', '', s) for s in sim_out[a]]
+        sim_out['param_num_agg'] = sim_out[agg_param_names].apply(lambda x: reduce(lambda a, b: str(a) + str(b), x), axis=1).rank(method='dense', ascending=True)
 
+        sim_out['param_num'] = sim_out[model_param_dict.keys()].apply(lambda x: reduce(lambda a, b: str(a) + str(b), x), axis=1).rank(method='dense', ascending=True)
 
-agg_param_names = list(set(model_param_dict.keys()) - set(['seed']))
+        self.sim_output = sim_out
+        return sim_out
+
+    def aggregate_simulation_output(self):
+        pass
 
 simulator = Simulator(param_dict_list=model_params, training_data=train_data_init, predictors=predictors, target=target)
 
@@ -870,13 +887,25 @@ simulator = Simulator(param_dict_list=model_params, training_data=train_data_ini
 simulator.simulate()
 sim_out = simulator.simulation_output()
 
-for a in agg_param_names:
-    if sim_out.dtypes[a] != 'object':
-        continue
-    sim_out[a] = [re.sub('<function | at.*?>', '', s) for s in sim_out[a]]
 
-# figure out window function for sim_out
-sim_out['param_num'] = sim_out[agg_param_names].apply(lambda x: reduce(lambda a, b: str(a) + str(b), x), axis=1).rank(method='dense', ascending=True)
+agg_sim_out = sim_out[['param_num', 'param_num_agg', 'total_profit', 'total_exp_profit', 'total_bets_placed', 'total_correct_bets', 'total_games', 'total_available_bets', 'total_bet_amount']].groupby(['param_num', 'param_num_agg']).sum().reset_index(drop=False)
+
+
+# todo: aggregate agg_sim_out by param_num_agg
+agg_sim_out_grouped = agg_sim_out[['param_num_agg', 'total_profit', 'total_exp_profit','total_bets_placed', 'total_correct_bets', 'total_games','total_available_bets']].groupby(['param_num_agg'])
+
+agg_sim_out2 = agg_sim_out_grouped.agg([np.size
+                             ,  np.mean
+                             ,  np.std
+                             ,  np.min
+                             ,  quartile1
+                             ,  np.median
+                             ,  quartile3
+                             ,  np.max])
+
+names_old = list(agg_sim_out2.columns.values)
+new_names = [str(o[1])+'_'+str(o[0]) for o in names_old]
+agg_sim_out2.columns = new_names
 
 mod = simulation.recommender.modeler.model_object
 plot_xgb_feat_importance(mod.base_estimator, predictors, 'gain', 'blue', 30)
