@@ -66,6 +66,9 @@ def calc_stat_expanding_mean(df, apply_col, groupby_col):
     #return(df.groupby(groupby_col)[apply_col].expanding().mean())
     return(df.groupby(groupby_col)[apply_col].apply(lambda x: x.shift(1).expanding().mean()))
 
+def calc_stat_prev(df, apply_col, groupby_col):
+    return df.groupby(groupby_col)[apply_col].apply(lambda x: x.shift(1))
+
 def calc_stat_ewma(df, apply_col, groupby_col):
     return(df.groupby(groupby_col)[apply_col].apply(lambda x: x.shift(1).ewm(halflife=5).mean()))
 
@@ -141,6 +144,8 @@ team_data = team_data.merge(team_data[['GAME_NUMBER', 'TEAM_NUMBER']+home_away_c
 team_data = team_data.merge(team_data[['GAME_NUMBER', 'TEAM_NUMBER']+home_away_cols], how='left', left_on=['GAME_NUMBER', 'TEAM_NUMBER_AWAY'], right_on=['GAME_NUMBER', 'TEAM_NUMBER'], suffixes=['','_AWAY'])
 
 team_data['PTS_TOTAL'] = team_data['PTS_HOME'] + team_data['PTS_AWAY']
+
+team_data['pt_pct'] = team_data['PTS'] / team_data['PTS_TOTAL']
 
 # calculate per-minute stats
 team_stats_per_min = [
@@ -219,6 +224,7 @@ mean_features = [s + '_per_min' for s in team_stats_per_min] + [
 ,'DEF_RATING'
 ,'EFG_PCT'
 ,'TM_TOV_PCT'
+,'pt_pct'
     ]
 
 
@@ -229,6 +235,9 @@ ewma_features = mean_features
 
 team_data = calc_groupby_feature(team_data, calc_stat_ewma, ewma_features, groupby_col= ['TEAM_NUMBER', 'SEASON_NUMBER'], prefix='TEAM_FEATURE_', suffix='_ewma')
 
+prev_features = mean_features
+
+team_data = calc_groupby_feature(team_data, calc_stat_prev, prev_features, groupby_col=['TEAM_NUMBER', 'SEASON_NUMBER'], prefix='TEAM_FEATURE_', suffix='_prev')
 
 # calculate same features for home games vs. away
 team_data_home = team_data[team_data['TEAM_IS_HOME_TEAM'] == 1]
@@ -256,6 +265,10 @@ team_data_away = calc_groupby_feature(team_data_away, calc_stat_expanding_mean, 
 # ewma features
 team_data_home = calc_groupby_feature(team_data_home, calc_stat_ewma, ewma_features, groupby_col= ['TEAM_NUMBER', 'SEASON_NUMBER'], prefix='TEAM_FEATURE_', suffix='_ewma_HOME')
 team_data_away= calc_groupby_feature(team_data_away, calc_stat_ewma, ewma_features, groupby_col= ['TEAM_NUMBER', 'SEASON_NUMBER'], prefix='TEAM_FEATURE_', suffix='_ewma_AWAY')
+
+# prev features
+team_data_home = calc_groupby_feature(team_data_home, calc_stat_prev, prev_features, groupby_col= ['TEAM_NUMBER', 'SEASON_NUMBER'], prefix='TEAM_FEATURE_', suffix='_prev_HOME')
+team_data_away= calc_groupby_feature(team_data_away, calc_stat_prev, prev_features, groupby_col= ['TEAM_NUMBER', 'SEASON_NUMBER'], prefix='TEAM_FEATURE_', suffix='_prev_AWAY')
 
 # win pct
 team_data_home['TEAM_FEATURE_cumulative_win_pct_HOME'] = team_data_home['TEAM_FEATURE_WIN_cumulative_sum'] / team_data_home['TEAM_FEATURE_cumulative_count_GAME_NUMBER']
@@ -374,7 +387,6 @@ odds_cols = ['avg_odds_home',
 
 train_data = train_data.merge(odds_data[odds_cols + ['GAME_DATE', 'TEAM_NUMBER_HOME', 'TEAM_NUMBER_AWAY']], how='left', on=['GAME_DATE', 'TEAM_NUMBER_HOME', 'TEAM_NUMBER_AWAY'])
 
-
 train_data['GAME_DATE_date'] = [dt.datetime.strptime(s, '%Y-%m-%d').date()for s in train_data['GAME_DATE']]
 
 train_data['GAME_DATE_week_number'] = [s.isocalendar()[1] for s in train_data['GAME_DATE_date']]
@@ -406,6 +418,12 @@ train_data['TEAM_FEATURE_cumulative_win_pct_COURT_HOME_AWAY_frac'] =train_data['
 train_data['TEAM_FEATURE_cumulative_pt_pct_COURT_pythag_HOME'] = pythagorean_exp(train_data['TEAM_FEATURE_cumulative_pt_pct_COURT_HOME'], train_data['TEAM_FEATURE_cumulative_pt_pct_COURT_AWAY'], train_data['TEAM_FEATURE_cumulative_count_GAME_NUMBER_HOME'])
 
 train_data['TEAM_FEATURE_cumulative_win_pct_COURT_pythag_HOME'] = pythagorean_exp(train_data['TEAM_FEATURE_cumulative_win_pct_COURT_HOME'], train_data['TEAM_FEATURE_cumulative_win_pct_COURT_AWAY'], train_data['TEAM_FEATURE_cumulative_count_GAME_NUMBER_HOME'])
+
+train_data['TEAM_FEATURE_OFF_RATING_ewma_pythag_adj_HOME_AWAY_diff'] = train_data['TEAM_FEATURE_OFF_RATING_ewma_pythag_HOME_adj'] - train_data['TEAM_FEATURE_OFF_RATING_ewma_pythag_AWAY_adj']
+
+train_data['TEAM_FEATURE_pct_pct_prev_COURT_HOME_AWAY_diff'] = train_data['TEAM_FEATURE_pt_pct_prev_COURT_HOME'] - train_data['TEAM_FEATURE_pt_pct_prev_COURT_AWAY']
+
+train_data['TEAM_FEATURE_pct_pct_prev_HOME_AWAY_diff'] = train_data['TEAM_FEATURE_pt_pct_prev_HOME'] - train_data['TEAM_FEATURE_pt_pct_prev_AWAY']
 
 # limit to regular season
 train_data = train_data[train_data['SEASON_TYPE'] == 'Regular Season']
